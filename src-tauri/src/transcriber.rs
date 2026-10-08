@@ -2,6 +2,7 @@
 //! OpenAI-compatible batch endpoint (local Ollama by default).
 
 use crate::batch_stt::{BatchClient, BatchSettings, RequestOptions};
+use crate::config::{Profile, ProfileSettings};
 use crate::gladia::GladiaClient;
 use crate::vocabulary::CustomVocabEntry;
 use serde::Serialize;
@@ -32,20 +33,16 @@ pub enum Provider {
 }
 
 impl Provider {
-    /// Unknown values fall back to Gladia so a hand-edited config never bricks dictation.
-    pub fn from_config(value: &str) -> Self {
-        match value {
-            PROVIDER_OPENAI_COMPAT => Provider::OpenAiCompat,
-            PROVIDER_GLADIA => Provider::Gladia,
-            other => {
-                log::warn!("[transcriber] unknown provider {other:?}; using Gladia");
-                Provider::Gladia
-            }
+    pub fn for_profile(settings: &ProfileSettings) -> Self {
+        match settings {
+            ProfileSettings::Gladia { .. } => Provider::Gladia,
+            ProfileSettings::OpenAiCompat { .. } => Provider::OpenAiCompat,
         }
     }
 }
 
 /// Inputs for one dictation session; each provider uses the fields it needs.
+#[derive(Debug)]
 pub struct SessionParams {
     pub api_key: String,
     pub languages: Option<Vec<String>>,
@@ -53,7 +50,48 @@ pub struct SessionParams {
     pub custom_vocabulary: Vec<CustomVocabEntry>,
     pub endpointing: f64,
     pub region: &'static str,
-    pub batch: BatchSettings,
+    pub batch: Option<BatchSettings>,
+}
+
+impl SessionParams {
+    /// Session inputs for `profile` plus the shared settings. A Gladia region of
+    /// `"auto"` resolves to `detected_region` (timezone-based).
+    pub fn for_profile(
+        profile: &Profile,
+        languages: Option<Vec<String>>,
+        custom_vocabulary: Vec<CustomVocabEntry>,
+        detected_region: &'static str,
+    ) -> Self {
+        match &profile.settings {
+            ProfileSettings::Gladia {
+                api_key,
+                region,
+                endpointing,
+                code_switching,
+            } => SessionParams {
+                api_key: api_key.clone(),
+                languages,
+                code_switching: *code_switching,
+                custom_vocabulary,
+                endpointing: *endpointing,
+                region: match region.as_str() {
+                    "eu-west" => "eu-west",
+                    "us-west" => "us-west",
+                    _ => detected_region,
+                },
+                batch: None,
+            },
+            ProfileSettings::OpenAiCompat { .. } => SessionParams {
+                api_key: String::new(),
+                languages,
+                code_switching: false,
+                custom_vocabulary,
+                endpointing: crate::config::DEFAULT_ENDPOINTING,
+                region: detected_region,
+                batch: profile.settings.batch_settings(),
+            },
+        }
+    }
 }
 
 pub enum Transcriber {
@@ -106,11 +144,14 @@ impl Transcriber {
                 .await
                 .map_err(|e| e.to_string()),
             Transcriber::OpenAiCompat(c) => {
+                let batch = params
+                    .batch
+                    .ok_or_else(|| "Missing OpenAI-compatible endpoint settings".to_string())?;
                 let options = RequestOptions::from_session(
                     params.languages.as_deref().unwrap_or_default(),
                     params.custom_vocabulary,
                 );
-                Ok(c.init_session(params.batch, options))
+                Ok(c.init_session(batch, options))
             }
         }
     }
@@ -164,15 +205,89 @@ impl Transcriber {
 mod tests {
     use super::*;
 
+    fn profile(settings: ProfileSettings) -> Profile {
+        Profile {
+            id: "p".to_string(),
+            name: "P".to_string(),
+            settings,
+        }
+    }
+
+    fn gladia(region: &str) -> Profile {
+        profile(ProfileSettings::Gladia {
+            api_key: "g-key".to_string(),
+            region: region.to_string(),
+            endpointing: 0.4,
+            code_switching: true,
+        })
+    }
+
+    fn local() -> Profile {
+        profile(ProfileSettings::OpenAiCompat {
+            base_url: "http://localhost:11434/v1".to_string(),
+            model: "gemma4:e4b".to_string(),
+            api_key: String::new(),
+        })
+    }
+
     #[test]
-    fn provider_parses_config_values() {
-        assert_eq!(Provider::from_config("gladia"), Provider::Gladia);
+    fn provider_follows_the_profile_kind() {
         assert_eq!(
-            Provider::from_config("openai_compat"),
+            Provider::for_profile(&gladia("auto").settings),
+            Provider::Gladia
+        );
+        assert_eq!(
+            Provider::for_profile(&local().settings),
             Provider::OpenAiCompat
         );
-        assert_eq!(Provider::from_config(""), Provider::Gladia);
-        assert_eq!(Provider::from_config("whisper.cpp"), Provider::Gladia);
+    }
+
+    #[test]
+    fn session_params_come_from_a_gladia_profile() {
+        let langs = Some(vec!["en".to_string()]);
+        let params = SessionParams::for_profile(&gladia("auto"), langs.clone(), vec![], "eu-west");
+        assert_eq!(params.api_key, "g-key");
+        assert_eq!(params.endpointing, 0.4);
+        assert!(params.code_switching);
+        assert_eq!(params.region, "eu-west");
+        assert_eq!(params.languages, langs);
+        assert!(params.batch.is_none());
+        let params = SessionParams::for_profile(&gladia("us-west"), None, vec![], "eu-west");
+        assert_eq!(params.region, "us-west");
+        let params = SessionParams::for_profile(&gladia("eu-west"), None, vec![], "us-west");
+        assert_eq!(params.region, "eu-west");
+    }
+
+    #[test]
+    fn session_params_come_from_an_openai_compat_profile() {
+        let params = SessionParams::for_profile(&local(), None, vec![], "eu-west");
+        let batch = params.batch.expect("batch settings");
+        assert_eq!(batch.base_url, "http://localhost:11434/v1");
+        assert_eq!(batch.model, "gemma4:e4b");
+        assert_eq!(batch.api_key, None);
+        assert!(params.api_key.is_empty());
+    }
+
+    #[tokio::test]
+    async fn switching_active_profile_kind_swaps_the_client() {
+        let mut transcriber = Transcriber::for_provider(Provider::Gladia);
+        for (profile, expected) in [
+            (local(), Provider::OpenAiCompat),
+            (gladia("auto"), Provider::Gladia),
+        ] {
+            transcriber
+                .ensure_provider(Provider::for_profile(&profile.settings))
+                .await;
+            assert_eq!(transcriber.provider(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_session_without_endpoint_settings_is_an_error() {
+        let transcriber = Transcriber::for_provider(Provider::OpenAiCompat);
+        let mut params = SessionParams::for_profile(&local(), None, vec![], "eu-west");
+        params.batch = None;
+        assert!(transcriber.init_session(params).await.is_err());
     }
 
     #[test]

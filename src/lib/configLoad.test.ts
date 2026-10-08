@@ -1,14 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadSavedApiKey, resetCorruptedConfig } from "./configLoad";
+import { loadSavedProfiles, resetCorruptedConfig } from "./configLoad";
+import type { ProfilesState } from "./sttProvider";
 
-describe("loadSavedApiKey", () => {
-  it("distinguishes a missing key from a load failure", async () => {
-    await expect(loadSavedApiKey(async () => null)).resolves.toEqual({
+const keyless: ProfilesState = {
+  profiles: [
+    {
+      id: "local-ollama",
+      name: "Local Ollama",
+      kind: "openai_compat",
+      base_url: "http://localhost:11434/v1",
+      model: "gemma4:e4b",
+      api_key: "",
+    },
+  ],
+  active_profile_id: "local-ollama",
+};
+
+describe("loadSavedProfiles", () => {
+  it("distinguishes a keyless setup from a load failure", async () => {
+    await expect(loadSavedProfiles(async () => keyless)).resolves.toEqual({
       ok: true,
-      apiKey: null,
+      profiles: keyless,
     });
 
-    const failure = await loadSavedApiKey(async () => {
+    const failure = await loadSavedProfiles(async () => {
       throw new Error("malformed config");
     });
     expect(failure).toEqual({
@@ -18,14 +33,30 @@ describe("loadSavedApiKey", () => {
     });
   });
 
-  it("returns the saved key without logging its value", async () => {
-    const invokeApiKey = vi.fn(async () => "secret-key");
+  it("returns the saved profiles without logging their keys", async () => {
+    const saved: ProfilesState = {
+      profiles: [
+        {
+          id: "gladia",
+          name: "Gladia",
+          kind: "gladia",
+          api_key: "secret-key",
+          region: "auto",
+          endpointing: 0.1,
+          code_switching: false,
+        },
+      ],
+      active_profile_id: "gladia",
+    };
+    const invokeProfiles = vi.fn(async () => saved);
+    const log = vi.spyOn(console, "log");
 
-    await expect(loadSavedApiKey(invokeApiKey)).resolves.toEqual({
+    await expect(loadSavedProfiles(invokeProfiles)).resolves.toEqual({
       ok: true,
-      apiKey: "secret-key",
+      profiles: saved,
     });
-    expect(invokeApiKey).toHaveBeenCalledOnce();
+    expect(invokeProfiles).toHaveBeenCalledOnce();
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("passes explicit confirmation only when reset is called", async () => {

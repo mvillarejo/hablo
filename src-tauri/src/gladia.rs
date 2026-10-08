@@ -50,6 +50,8 @@ pub struct GladiaConfig {
     pub code_switching: bool,
     pub endpointing: f64,
     pub custom_vocabulary: Vec<CustomVocabEntry>,
+    /// Region the live session was opened in; part of the reuse check.
+    pub region: String,
 }
 
 impl Default for GladiaConfig {
@@ -65,6 +67,7 @@ impl Default for GladiaConfig {
             code_switching: false,
             endpointing: 0.6,
             custom_vocabulary: vec![],
+            region: String::new(),
         }
     }
 }
@@ -206,10 +209,13 @@ impl GladiaClient {
         // Guard: reuse an existing live session only when config is unchanged.
         {
             let config = self.config.lock().await;
+            let same_key = self.api_key.lock().await.as_deref() == Some(api_key);
             let session_unchanged = config.custom_vocabulary == normalized_vocabulary
                 && config.languages == resolved_languages
                 && config.code_switching == code_switching
-                && config.endpointing == endpointing;
+                && config.endpointing == endpointing
+                && config.region == region
+                && same_key;
             drop(config);
 
             if session_unchanged {
@@ -240,6 +246,7 @@ impl GladiaClient {
             config.languages = resolved_languages.clone();
             config.custom_vocabulary = normalized_vocabulary.clone();
             config.endpointing = endpointing;
+            config.region = region.to_string();
             let api_vocabulary =
                 expand_vocabulary_for_languages(normalized_vocabulary, &config.languages);
             let realtime_processing = if api_vocabulary.is_empty() {
