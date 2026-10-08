@@ -159,8 +159,7 @@ async fn apply_tray_activity(
         _ => {
             let icon = tray_icon_from_bytes(TRAY_ICON_IDLE)?;
             tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
-            tray.set_tooltip(Some("TTM"))
-                .map_err(|e| e.to_string())?;
+            tray.set_tooltip(Some("TTM")).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
