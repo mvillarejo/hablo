@@ -4,7 +4,6 @@
   <p><strong>Fast, accurate voice dictation in any desktop app.</strong></p>
 
   <p>
-    <a href="https://github.com/mvillarejo/ttm/releases"><img src="https://img.shields.io/github/v/release/mvillarejo/ttm?display_name=tag" alt="Latest release" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b5cf6.svg" alt="MIT license" /></a>
     <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2" />
   </p>
@@ -18,7 +17,7 @@
   </p>
 </div>
 
-TTM is an open-source desktop app that turns speech into text wherever you type. Hold a hotkey, speak, and the app streams your microphone to the [Gladia Live Transcription API](https://docs.gladia.io/), cleans the result, and pastes it into the focused application.
+TTM is an open-source desktop app that turns speech into text wherever you type. Hold a hotkey, speak, and the app sends your audio to the [Gladia Live Transcription API](https://docs.gladia.io/) or to a [local model through Ollama](#using-a-local-model-ollama), cleans the result, and pastes it into the focused application.
 
 > [!NOTE]
 >
@@ -27,7 +26,7 @@ TTM is an open-source desktop app that turns speech into text wherever you type.
 ## Why TTM?
 
 - **Dictate anywhere** — paste transcribed speech into editors, browsers, chat apps, and more.
-- **See results live** — partial and final transcripts arrive over a low-latency WebSocket session.
+- **See results live** — with Gladia, partial and final transcripts arrive over a low-latency WebSocket session.
 - **Choose your workflow** — use push-to-talk or toggle mode with a configurable global hotkey.
 - **Improve specialist terms** — add custom vocabulary, pronunciations, and language hints.
 - **Speak naturally** — automatic endpointing and transcript cleanup produce readable text.
@@ -36,9 +35,16 @@ TTM is an open-source desktop app that turns speech into text wherever you type.
 
 ## Quick start
 
-Download the latest installer from [GitHub Releases](https://github.com/mvillarejo/ttm/releases), then:
+This fork has no GitHub Releases yet, so build TTM from source. Install the [prerequisites](#prerequisites) first. On macOS:
 
-1. Launch TTM and enter your [Gladia API key](https://app.gladia.io/).
+```bash
+npm ci
+npm run tauri build
+```
+
+Copy `src-tauri/target/release/bundle/macos/TTM.app` to `/Applications`, then:
+
+1. Launch TTM and either choose a local model ([Ollama](#using-a-local-model-ollama), see below) or enter a [Gladia API key](https://app.gladia.io/).
 2. Grant microphone access. On macOS, also grant Accessibility access so TTM can paste into other apps.
 3. Focus any text field and use the activation shortcut:
    - **macOS:** hold <kbd>Fn</kbd> / <kbd>Globe</kbd>
@@ -71,7 +77,7 @@ Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint
 - [Node.js](https://nodejs.org/) 20.19 or newer
 - [Rust](https://www.rust-lang.org/tools/install) stable
 - The [Tauri 2 system dependencies](https://v2.tauri.app/start/prerequisites/) for your platform
-- A [Gladia API key](https://app.gladia.io/) for end-to-end transcription testing
+- For end-to-end transcription testing, either a [Gladia API key](https://app.gladia.io/) or local [Ollama](https://ollama.com) with `gemma4:e4b` (no key needed)
 
 Windows development also requires the Microsoft C++ Build Tools and WebView2. WebView2 is already included with current Windows 10 and Windows 11 installations.
 
@@ -84,7 +90,7 @@ npm ci
 npm run tauri:dev
 ```
 
-The last command starts Vite, opens the Tauri application, and enables frontend and Rust hot reload. Enter your API key through the onboarding screen; no `.env` file is needed.
+The last command starts Vite, opens the Tauri application, and enables frontend and Rust hot reload. On first launch, choose a local model (Ollama) or enter a Gladia API key; no `.env` file is needed.
 
 > [!TIP]
 >
@@ -114,13 +120,14 @@ npm run build
 ## How it works
 
 ```text
-Global hotkey → microphone capture → Gladia WebSocket
+Global hotkey → microphone capture ─┬→ Gladia WebSocket (live)
+                                    └→ OpenAI-compatible /audio/transcriptions (batch, e.g. local Ollama)
                                         ↓
 Focused app ← clipboard-safe paste ← transcript cleanup
 ```
 
-1. The global hotkey starts microphone capture and opens a Gladia live session.
-2. PCM audio is sent in chunks while partial and final transcription events stream back.
+1. The global hotkey starts microphone capture and opens a Gladia live session. The OpenAI-compatible provider instead buffers the audio and transcribes it after you release the hotkey.
+2. With Gladia, PCM audio is sent in chunks while partial and final transcription events stream back.
 3. Final utterances pass through `UtteranceCleaner`, which handles punctuation, capitalization, and duplicates.
 4. Clean incremental text is pasted into the focused app without permanently replacing the clipboard.
 5. Releasing the hotkey—or toggling it off—finalizes the session and returns the overlay to idle.
@@ -138,6 +145,7 @@ Focused app ← clipboard-safe paste ← transcript cleanup
 Important backend modules include:
 
 - `gladia.rs` — live WebSocket transcription session
+- `batch_stt.rs` — OpenAI-compatible batch transcription (local Ollama by default)
 - `audio.rs` — microphone capture and PCM streaming
 - `hotkey.rs` — global activation shortcut and accessibility checks
 - `utterance_cleaner.rs` — incremental transcript post-processing
