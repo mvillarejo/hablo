@@ -63,12 +63,14 @@ TTM can transcribe with a local model through Ollama's OpenAI-compatible API ins
    ollama pull gemma4:e4b
    ```
 
-2. In TTM, open **Transcription settings** and set **Provider** to **OpenAI-compatible**. On first launch you can pick **Use a local model (Ollama) instead** rather than entering a Gladia key.
-3. Keep the defaults (base URL `http://localhost:11434/v1`, model `gemma4:e4b`, no API key) and click **Test connection**.
+2. A new install starts with an active **Local Ollama** profile. If you already used Gladia, open **Transcription settings** and select **Local Ollama**, or add an **OpenAI-compatible** profile. The onboarding screen also has **Use a local model (Ollama) instead**.
+3. Keep the defaults (base URL `http://localhost:11434/v1`, model `gemma4:e4b`, no API key), click **Edit** on the profile and then **Test connection**.
 
 There is no streaming with this provider. Nothing shows while you speak: TTM transcribes the whole recording after you release the shortcut, and sends recordings longer than 28 seconds as consecutive chunks. In testing, a 3-second clip came back in about 1 second and a 46-second clip in about 27 seconds.
 
-Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint, such as Groq or OpenAI, work the same way: change the base URL, API key and model. In that case the audio goes to that service.
+Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint, such as Groq or OpenAI, work the same way: add an OpenAI-compatible profile with that service's base URL, API key and model. In that case the audio goes to that service.
+
+You can keep several profiles, for example two Ollama servers with different models, or a work and a personal Gladia account. One profile is active at a time. Switch it in **Transcription settings** or from the **Provider** submenu of the menu bar icon. A switch during a dictation takes effect on the next one. Languages and custom vocabulary are shared by all profiles.
 
 ## Development
 
