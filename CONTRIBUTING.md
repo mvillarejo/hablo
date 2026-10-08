@@ -20,7 +20,7 @@ npm ci
 npm run tauri:dev
 ```
 
-3. Enter a [Gladia API key](https://app.gladia.io/) in the onboarding screen when testing transcription end to end. Real microphone audio is streamed to Gladia under their [privacy notice](https://www.gladia.io/privacy-notice) and [terms](https://www.gladia.io/terms-conditions); see [Privacy and data handling](README.md#privacy-and-data-handling).
+3. Enter a [Gladia API key](https://app.gladia.io/) in the onboarding screen when testing transcription end to end. Real microphone audio is streamed to Gladia under their [privacy notice](https://www.gladia.io/privacy-notice) and [terms](https://www.gladia.io/terms-conditions); see [Privacy and data handling](README.md#privacy-and-data-handling). You can also test with a local model and no key: Ollama with `gemma4:e4b`, where audio stays on your machine. See [Using a local model](README.md#using-a-local-model-ollama).
 
 `npm run dev` is enough for UI-only work. Native audio, global shortcuts, clipboard paste, and Tauri commands require `npm run tauri:dev`.
 

@@ -1,7 +1,7 @@
 [package]
 name = "ttm"
 version = "0.1.0"
-description = "A Tauri App for real-time voice dictation with Gladia"
+description = "Voice dictation for any app with local models via Ollama or Gladia live streaming"
 authors = ["Manuel Villarejo"]
 edition = "2021"
 
