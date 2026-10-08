@@ -22,7 +22,7 @@ TTM is an open-source desktop app that turns speech into text wherever you type.
 
 > [!NOTE]
 >
-> TTM currently supports macOS and Windows. A [Gladia API key](https://app.gladia.io/) is required.
+> TTM currently supports macOS and Windows. A [Gladia API key](https://app.gladia.io/) is required unless you [use a local model](#using-a-local-model-ollama).
 
 ## Why TTM?
 
@@ -46,6 +46,23 @@ Download the latest installer from [GitHub Releases](https://github.com/mvillare
 4. Speak, then release the shortcut to finish the session.
 
 The shortcut and activation mode can be changed in **App settings**.
+
+## Using a local model (Ollama)
+
+TTM can transcribe with a local model through Ollama's OpenAI-compatible API instead of Gladia. You don't need an API key, and audio never leaves your machine.
+
+1. Install [Ollama](https://ollama.com) and pull the model:
+
+   ```sh
+   ollama pull gemma4:e4b
+   ```
+
+2. In TTM, open **Transcription settings** and set **Provider** to **OpenAI-compatible**. On first launch you can pick **Use a local model (Ollama) instead** rather than entering a Gladia key.
+3. Keep the defaults (base URL `http://localhost:11434/v1`, model `gemma4:e4b`, no API key) and click **Test connection**.
+
+There is no streaming with this provider. Nothing shows while you speak: TTM transcribes the whole recording after you release the shortcut, and sends recordings longer than 28 seconds as consecutive chunks. In testing, a 3-second clip came back in about 1 second and a 46-second clip in about 27 seconds.
+
+Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint, such as Groq or OpenAI, work the same way: change the base URL, API key and model. In that case the audio goes to that service.
 
 ## Development
 
@@ -155,13 +172,13 @@ The release workflow runs for tags matching `v*`, stamps the tag version into th
 
 ## Privacy and data handling
 
-TTM is a local desktop client. It does not operate its own cloud backend for dictation. When you dictate, microphone audio is sent to Gladia’s Live Transcription API, which is the sole remote processor for that audio.
+TTM is a local desktop client. It does not operate its own cloud backend for dictation. With the default Gladia provider, microphone audio is sent to Gladia’s Live Transcription API, which is the sole remote processor for that audio. With a [local model](#using-a-local-model-ollama), audio never leaves your machine.
 
 | Data | What happens |
 | --- | --- |
-| Microphone audio | During an active dictation session, PCM audio is streamed over WebSocket to the Gladia Live Transcription API. TTM does not save audio files locally. |
-| Transcripts | Text returns from Gladia. Cleaned transcript text and the Gladia session ID are stored locally in SQLite (`history.db` in the app config directory). |
-| Settings and API key | Stored locally in `config.json` in the user config directory (API key, hotkey, languages, custom vocabulary, and related preferences). |
+| Microphone audio | Gladia: during an active dictation session, PCM audio is streamed over WebSocket to the Gladia Live Transcription API. OpenAI-compatible provider: audio is held in memory until you stop, then sent as WAV to the configured base URL. With local Ollama (the default base URL), audio never leaves the machine. TTM does not save audio files locally. |
+| Transcripts | Text returns from the selected provider. Cleaned transcript text and the session ID (Gladia's, or a locally generated one) are stored locally in SQLite (`history.db` in the app config directory). |
+| Settings and API key | Stored locally in `config.json` in the user config directory (API keys, transcription provider and endpoint, hotkey, languages, custom vocabulary, and related preferences). |
 | Clipboard | Used transiently to paste transcribed text into the focused app. An optional setting can leave the final transcript on the clipboard. |
 
 Audio and transcripts processed by Gladia are subject to Gladia’s own policies:

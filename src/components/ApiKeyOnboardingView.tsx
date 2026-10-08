@@ -9,12 +9,14 @@ export function ApiKeyOnboardingView({
   isTesting,
   onChangeKey,
   onSave,
+  onUseLocalModel,
 }: {
   displayValue: string;
   isLocked: boolean;
   isTesting: boolean;
   onChangeKey: (v: string) => void;
   onSave: () => void;
+  onUseLocalModel: () => void;
 }) {
   return (
     <div className="setup-step setup-step-center">
@@ -39,6 +41,15 @@ export function ApiKeyOnboardingView({
             </button>
           }
         />
+        <div className="setup-nav setup-nav-center">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={onUseLocalModel}
+          >
+            Use a local model (Ollama) instead
+          </button>
+        </div>
       </div>
     </div>
   );

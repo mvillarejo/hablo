@@ -22,6 +22,7 @@ const SCREENS = screensArg
       "06b-vocabulary-editor",
       "06c-vocabulary-new",
       "07-transcription-settings",
+      "07b-transcription-settings-local",
       "08-app-settings",
       "09-language-picker",
     ];

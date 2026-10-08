@@ -49,6 +49,14 @@ import {
 } from "./lib/holdModeWarning";
 import { loadSavedApiKey, resetCorruptedConfig } from "./lib/configLoad";
 import { resolveHotkeyPress } from "./lib/dictationHotkey";
+import {
+  canDictate,
+  DEFAULT_STT_SETTINGS,
+  isBatchProvider,
+  sessionEndFallbackMs,
+  validateSttBaseUrl,
+  type SttSettings,
+} from "./lib/sttProvider";
 import { SidebarNav, type NavScreen } from "./components/SidebarNav";
 import { AppSettingsView } from "./components/AppSettingsView";
 import { TranscriptionSettingsView } from "./components/TranscriptionSettingsView";
@@ -132,6 +140,8 @@ export default function App() {
     detail: "",
   });
   const [apiKey, setApiKey] = useState<string>("");
+  const [sttSettings, setSttSettings] =
+    useState<SttSettings>(DEFAULT_STT_SETTINGS);
   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false);
   const [hasSavedApiKey, setHasSavedApiKey] = useState(false);
   const [isTestingApiKey, setIsTestingApiKey] = useState(false);
@@ -204,6 +214,7 @@ export default function App() {
   const copyToClipboardLoaded = useRef(false);
   const activationModeLoaded = useRef(false);
   const audioDeviceSelectionLoaded = useRef(false);
+  const sttSettingsLoaded = useRef(false);
 
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -218,6 +229,10 @@ export default function App() {
   const checkAllPermissionsRef = useRef<() => void>(() => {});
   const permissionCheckInFlightRef = useRef<Promise<void> | null>(null);
   const apiKeyRef = useRef(apiKey);
+  const sttSettingsRef = useRef(sttSettings);
+  /** Gladia needs a saved key; an OpenAI-compatible endpoint does not. */
+  const canDictateNow = () =>
+    canDictate(sttSettingsRef.current.provider, apiKeyRef.current);
   const refreshTranscriptionHistoryRef = useRef<() => Promise<void>>(
     async () => {},
   );
@@ -313,6 +328,19 @@ export default function App() {
       selection: settings.audioDeviceSelection,
     }).catch(console.error);
   }, [settings.audioDeviceSelection]);
+  useEffect(() => {
+    sttSettingsRef.current = sttSettings;
+    if (!sttSettingsLoaded.current) return;
+    // Only persist values the backend will accept; the form shows the error.
+    if (validateSttBaseUrl(sttSettings.baseUrl) || !sttSettings.model.trim()) {
+      return;
+    }
+    invoke("save_stt_settings", { settings: sttSettings }).catch(console.error);
+    if (sessionInitialized.current && !isRecordingRef.current) {
+      sessionInitialized.current = false;
+      invoke("close_gladia_session").catch(console.error);
+    }
+  }, [sttSettings]);
   useEffect(() => {
     permissionsRef.current = permissions;
   }, [permissions]);
@@ -503,6 +531,15 @@ export default function App() {
       const v = await getVersion().catch(() => "");
       setAppVersion(v);
 
+      // Load the provider before the API key so the onboarding gate never
+      // flashes for users on a keyless (local) provider.
+      const savedSttSettings = await invoke<SttSettings>(
+        "get_stt_settings",
+      ).catch(() => DEFAULT_STT_SETTINGS);
+      sttSettingsRef.current = savedSttSettings;
+      setSttSettings(savedSttSettings);
+      sttSettingsLoaded.current = true;
+
       await loadApiKeyFromConfig();
 
       const savedHotkey = await invoke<string | null>("get_hotkey").catch(
@@ -663,7 +700,7 @@ export default function App() {
           clearStopFallbackTimer();
 
           if (!stopRequestedRef.current) {
-            if (isRecordingRef.current && apiKeyRef.current.trim()) {
+            if (isRecordingRef.current && canDictateNow()) {
               try {
                 sessionInitialized.current = false;
                 await invoke("close_gladia_session").catch(console.error);
@@ -1282,37 +1319,49 @@ export default function App() {
     setAudioDeviceDropdownOpen(dropdown === "audioDevice");
   };
 
+  // Batch providers have no partials: the text only arrives after stop.
+  const finalizingDetail = () =>
+    isBatchProvider(sttSettingsRef.current.provider)
+      ? "Transcribing your recording..."
+      : "Pasting your transcription";
+
   const scheduleSessionEndFallback = () => {
     clearStopFallbackTimer();
-    stopFallbackTimerRef.current = setTimeout(async () => {
-      stopFallbackTimerRef.current = null;
-      if (stopRequestedRef.current) {
-        // Always release the finalizing state, even when no Gladia session was
-        // ever opened — otherwise the app stays stuck on "Finalizing...".
-        console.warn("Gladia session timed out — closing");
-        logWarn(
-          `[dictation-stop] session-ended not received after stop; forcing reset (session=${sessionInitialized.current ? "open" : "none"})`,
-        ).catch(() => {});
-        if (sessionInitialized.current) {
-          await invoke("close_gladia_session").catch(console.error);
-          sessionInitialized.current = false;
+    const startedAt = dictationStartTimeRef.current;
+    const recordingSeconds =
+      startedAt === null ? 0 : (Date.now() - startedAt) / 1000;
+    stopFallbackTimerRef.current = setTimeout(
+      async () => {
+        stopFallbackTimerRef.current = null;
+        if (stopRequestedRef.current) {
+          // Always release the finalizing state, even when no Gladia session was
+          // ever opened — otherwise the app stays stuck on "Finalizing...".
+          console.warn("Gladia session timed out — closing");
+          logWarn(
+            `[dictation-stop] session-ended not received after stop; forcing reset (session=${sessionInitialized.current ? "open" : "none"})`,
+          ).catch(() => {});
+          if (sessionInitialized.current) {
+            await invoke("close_gladia_session").catch(console.error);
+            sessionInitialized.current = false;
+          }
+          stopRequestedRef.current = false;
+          setProcessingState(false);
+          setStatus({
+            phase: "done",
+            title: "Ready",
+            detail: "Transcription complete",
+          });
         }
-        stopRequestedRef.current = false;
-        setProcessingState(false);
-        setStatus({
-          phase: "done",
-          title: "Ready",
-          detail: "Transcription complete",
-        });
-      }
-    }, 5_000);
+      },
+      sessionEndFallbackMs(sttSettingsRef.current.provider, recordingSeconds),
+    );
   };
 
   const handleStartDictation = async () => {
     const keyDownAt = performance.now();
     const captureId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const currentApiKey = apiKeyRef.current;
-    if (!currentApiKey.trim()) return;
+    if (!canDictateNow()) return;
     if (isProcessingRef.current) return;
 
     pendingStartRef.current = false;
@@ -1508,7 +1557,7 @@ export default function App() {
     setStatus({
       phase: "finalizing",
       title: "Finalizing...",
-      detail: "Pasting your transcription",
+      detail: finalizingDetail(),
     });
 
     if (wasAudioReady) {
@@ -1549,7 +1598,7 @@ export default function App() {
       return;
     }
     if (justCapturedRef.current) return;
-    if (!apiKeyRef.current.trim()) return;
+    if (!canDictateNow()) return;
 
     const action = resolveHotkeyPress({
       activationMode: settingsRef.current.activationMode,
@@ -1595,7 +1644,7 @@ export default function App() {
     setStatus({
       phase: "finalizing",
       title: "Finalizing...",
-      detail: "Pasting your transcription",
+      detail: finalizingDetail(),
     });
     if (wasAudioReady) {
       audioCue.playStopSound();
@@ -1626,7 +1675,7 @@ export default function App() {
     }
     if (isCapturingRef.current) return;
     if (justCapturedRef.current) return;
-    if (!apiKeyRef.current.trim()) return;
+    if (!canDictateNow()) return;
     if (settingsRef.current.activationMode === "push-to-talk") {
       if (dictationStartTimeRef.current !== null) {
         completedDictationDurationRef.current = Math.max(
@@ -1650,7 +1699,7 @@ export default function App() {
     // teardown — especially transcription-error and paste-complete-during-close.
     if (sessionInitialized.current || stopRequestedRef.current) return;
     if (isRecordingRef.current || isInitializingRef.current) return;
-    if (!apiKeyRef.current.trim()) {
+    if (!canDictateNow()) {
       pendingStartRef.current = false;
       return;
     }
@@ -1770,7 +1819,12 @@ export default function App() {
         ? funnyHomeMessage
         : defaultIdlePrompt;
 
-  const activeScreen = resolveScreen(navScreen, permissions, hasSavedApiKey);
+  const isBatch = isBatchProvider(sttSettings.provider);
+  const activeScreen = resolveScreen(
+    navScreen,
+    permissions,
+    hasSavedApiKey || isBatch,
+  );
   const isGateScreen =
     activeScreen === "permissions" || activeScreen === "api-onboarding";
 
@@ -1842,6 +1896,8 @@ export default function App() {
               setLanguageSearch={setLanguageSearch}
               filteredLanguageOptions={filteredLanguageOptions}
               selectedLanguageSummary={selectedLanguageSummary}
+              sttSettings={sttSettings}
+              setSttSettings={setSttSettings}
               onDone={() => setNavScreen("home")}
             />
           )}
@@ -1909,6 +1965,13 @@ export default function App() {
               isTesting={isTestingApiKey}
               onChangeKey={setApiKey}
               onSave={handleSaveApiKey}
+              onUseLocalModel={() => {
+                setSttSettings((prev) => ({
+                  ...prev,
+                  provider: "openai_compat",
+                }));
+                setNavScreen("dictation");
+              }}
             />
           )}
           {activeScreen === "home" && (
@@ -1922,7 +1985,8 @@ export default function App() {
               funnyDictationComment={funnyDictationComment}
               apiKeyDisplayValue={apiKeyDisplayValue}
               isApiKeyLocked={isApiKeyLocked}
-              hasSavedApiKey={hasSavedApiKey}
+              hasSavedApiKey={hasSavedApiKey || isBatch}
+              showApiKeyField={!isBatch}
               isTestingApiKey={isTestingApiKey}
               onChangeApiKey={setApiKey}
               onSaveApiKey={handleSaveApiKey}
