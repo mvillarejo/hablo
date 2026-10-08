@@ -4,6 +4,10 @@ import {
   captureKeyToken,
   normalizeModifierFromCode,
   formatHotkeyLabel,
+  formatKeySymbol,
+  parseHotkeyParts,
+  bareKeyToken,
+  isBareKeyToken,
 } from "./keyboardUtils";
 
 function keyEvent(
@@ -85,5 +89,40 @@ describe("formatHotkeyLabel", () => {
   it("formats logical shortcuts", () => {
     expect(formatHotkeyLabel("Cmd+A")).toBe("⌘ A");
     expect(formatHotkeyLabel("Ctrl+Shift+;")).toBe("⌃ ⇧ ;");
+  });
+
+  it("shows the Section token as §", () => {
+    expect(formatHotkeyLabel("Section")).toBe("§");
+    expect(formatKeySymbol("Section")).toBe("§");
+    expect(parseHotkeyParts("Section")).toEqual(["Section"]);
+  });
+});
+
+describe("bareKeyToken", () => {
+  it("serializes the § key as Section whatever the layout prints", () => {
+    expect(bareKeyToken(keyEvent("§", "IntlBackslash"))).toBe("Section");
+    expect(bareKeyToken(keyEvent("±", "IntlBackslash"))).toBe("Section");
+    expect(bareKeyToken(keyEvent("<", "IntlBackslash"))).toBe("Section");
+  });
+
+  it("allows F13–F19 on their own", () => {
+    expect(bareKeyToken(keyEvent("F13", "F13"))).toBe("F13");
+    expect(bareKeyToken(keyEvent("F19", "F19"))).toBe("F19");
+  });
+
+  it("rejects keys that would block typing", () => {
+    expect(bareKeyToken(keyEvent("a", "KeyA"))).toBeNull();
+    expect(bareKeyToken(keyEvent("1", "Digit1"))).toBeNull();
+    expect(bareKeyToken(keyEvent(" ", "Space"))).toBeNull();
+    expect(bareKeyToken(keyEvent("F12", "F12"))).toBeNull();
+    // § typed from another physical key (e.g. Shift+3 on German) is not the § key.
+    expect(bareKeyToken(keyEvent("§", "Digit3"))).toBeNull();
+  });
+
+  it("recognises stored bare tokens", () => {
+    expect(isBareKeyToken("Section")).toBe(true);
+    expect(isBareKeyToken("F15")).toBe(true);
+    expect(isBareKeyToken("§")).toBe(false);
+    expect(isBareKeyToken("A")).toBe(false);
   });
 });

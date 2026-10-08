@@ -533,9 +533,15 @@ fn reset_corrupted_config_at(
 
 #[tauri::command]
 pub async fn save_hotkey(hotkey: String) -> Result<(), String> {
-    crate::hotkey::validate_hotkey(&hotkey)?;
+    let _guard = config_mutex().lock().unwrap();
+    save_hotkey_at(&get_config_path(), &hotkey)
+}
+
+fn save_hotkey_at(path: &Path, hotkey: &str) -> Result<(), String> {
+    crate::hotkey::validate_hotkey(hotkey)?;
+    let hotkey = crate::hotkey::canonical_hotkey(hotkey);
     log::info!("[hotkey] saving shortcut config: {hotkey:?}");
-    with_config(|config| {
+    with_config_at(path, |config| {
         config.hotkey = Some(hotkey);
     })
 }
@@ -965,6 +971,33 @@ mod tests {
         let loaded = load_config_from_path(&path).unwrap();
         assert_eq!(loaded.api_key.as_deref(), Some("secret"));
         assert_eq!(loaded.hotkey.as_deref(), Some("CmdRight"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn section_hotkey_round_trips_as_stable_token() {
+        let dir = TestConfigDir::new();
+        let path = dir.config_path();
+
+        save_hotkey_at(&path, "Section").unwrap();
+        assert_eq!(
+            load_config_from_path(&path).unwrap().hotkey.as_deref(),
+            Some("Section")
+        );
+
+        // The literal character is accepted but persisted as the token.
+        save_hotkey_at(&path, "§").unwrap();
+        assert_eq!(
+            load_config_from_path(&path).unwrap().hotkey.as_deref(),
+            Some("Section")
+        );
+
+        // A bare typing key is rejected and leaves the stored hotkey untouched.
+        assert!(save_hotkey_at(&path, "A").is_err());
+        assert_eq!(
+            load_config_from_path(&path).unwrap().hotkey.as_deref(),
+            Some("Section")
+        );
     }
 
     #[test]

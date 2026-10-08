@@ -28,6 +28,8 @@ import {
   sortKeys,
   modifierSideToken,
   isSingleModifierToken,
+  bareKeyToken,
+  isBareKeyToken,
   formatHotkeyLabel,
   formatKeyboardEventForLog,
 } from "./lib/keyboardUtils";
@@ -1123,7 +1125,8 @@ export default function App() {
     if (
       isMac &&
       recordingKeys.length === 1 &&
-      isSingleModifierToken(recordingKeys[0])
+      (isSingleModifierToken(recordingKeys[0]) ||
+        isBareKeyToken(recordingKeys[0]))
     ) {
       return true;
     }
@@ -1179,6 +1182,11 @@ export default function App() {
         // requiring a composite rather than silently substituting Modifier+Space.
         recordedHotkeyRef.current = sideToken;
         setRecordingKeys([sideToken]);
+      } else if (isMac && keys.length === 1 && bareKeyToken(e)) {
+        // A lone allowlisted key (§, F13–F19), stored as its stable token.
+        const bare = bareKeyToken(e)!;
+        recordedHotkeyRef.current = bare;
+        setRecordingKeys([bare]);
       } else {
         recordedHotkeyRef.current = "";
         setRecordingKeys([...keys]);
