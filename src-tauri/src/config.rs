@@ -17,6 +17,12 @@ pub const DEFAULT_ENDPOINTING: f64 = 0.1;
 /// Default activation mode used when the field is absent.
 pub const DEFAULT_ACTIVATION_MODE: &str = "push-to-talk";
 
+/// Transcription provider defaults. Gladia stays the default so existing
+/// configs keep working; the batch defaults target local Ollama.
+pub const DEFAULT_PROVIDER: &str = crate::transcriber::PROVIDER_GLADIA;
+pub const DEFAULT_STT_BASE_URL: &str = "http://localhost:11434/v1";
+pub const DEFAULT_STT_MODEL: &str = "gemma4:e4b";
+
 fn default_hotkey() -> String {
     if cfg!(target_os = "macos") {
         "Fn".to_string()
@@ -57,6 +63,14 @@ struct Config {
     /// The app version that last ran. Used to seed vocabulary on upgrade and for logging.
     #[serde(skip_serializing_if = "Option::is_none")]
     installed_version: Option<String>,
+    /// Transcription provider: "gladia" (live streaming) or "openai_compat" (batch).
+    provider: Option<String>,
+    /// Base URL of the OpenAI-compatible STT endpoint (e.g. local Ollama).
+    stt_base_url: Option<String>,
+    stt_model: Option<String>,
+    /// Optional bearer key for the OpenAI-compatible endpoint (unused by local Ollama).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stt_api_key: Option<String>,
 }
 
 impl Default for Config {
@@ -75,6 +89,10 @@ impl Default for Config {
             accessibility_prompted: Some(false),
             accessibility_cleanup_generation: Some(0),
             installed_version: None,
+            provider: Some(DEFAULT_PROVIDER.to_string()),
+            stt_base_url: Some(DEFAULT_STT_BASE_URL.to_string()),
+            stt_model: Some(DEFAULT_STT_MODEL.to_string()),
+            stt_api_key: None,
         }
     }
 }
@@ -115,6 +133,15 @@ impl Config {
         }
         if self.accessibility_cleanup_generation.is_none() {
             self.accessibility_cleanup_generation = defaults.accessibility_cleanup_generation;
+        }
+        if self.provider.is_none() {
+            self.provider = defaults.provider;
+        }
+        if self.stt_base_url.is_none() {
+            self.stt_base_url = defaults.stt_base_url;
+        }
+        if self.stt_model.is_none() {
+            self.stt_model = defaults.stt_model;
         }
     }
 }
@@ -239,6 +266,84 @@ pub fn audio_device_selection() -> Result<AudioDeviceSelection, String> {
             .audio_device_selection
             .clone()
             .unwrap_or(AudioDeviceSelection::Automatic)
+    })
+}
+
+/// Provider and OpenAI-compatible endpoint settings, as exchanged with the UI.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SttSettings {
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key: String,
+}
+
+impl SttSettings {
+    fn from_config(config: &Config) -> Self {
+        Self {
+            provider: config
+                .provider
+                .clone()
+                .unwrap_or_else(|| DEFAULT_PROVIDER.to_string()),
+            base_url: config
+                .stt_base_url
+                .clone()
+                .unwrap_or_else(|| DEFAULT_STT_BASE_URL.to_string()),
+            model: config
+                .stt_model
+                .clone()
+                .unwrap_or_else(|| DEFAULT_STT_MODEL.to_string()),
+            api_key: config.stt_api_key.clone().unwrap_or_default(),
+        }
+    }
+
+    pub fn batch_settings(&self) -> crate::batch_stt::BatchSettings {
+        crate::batch_stt::BatchSettings {
+            base_url: self.base_url.clone(),
+            model: self.model.clone(),
+            api_key: Some(self.api_key.clone()).filter(|key| !key.trim().is_empty()),
+        }
+    }
+}
+
+/// Trim and validate settings coming from the UI before they reach disk.
+pub fn validate_stt_settings(settings: SttSettings) -> Result<SttSettings, String> {
+    let provider = settings.provider.trim().to_string();
+    if provider != crate::transcriber::PROVIDER_GLADIA
+        && provider != crate::transcriber::PROVIDER_OPENAI_COMPAT
+    {
+        return Err(format!("Unknown transcription provider: {provider}"));
+    }
+    let base_url = settings.base_url.trim().trim_end_matches('/').to_string();
+    let parsed = url::Url::parse(&base_url)
+        .map_err(|_| format!("Base URL is not a valid URL: {base_url}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("Base URL must start with http:// or https://".to_string());
+    }
+    let model = settings.model.trim().to_string();
+    if model.is_empty() {
+        return Err("Model is required".to_string());
+    }
+    Ok(SttSettings {
+        provider,
+        base_url,
+        model,
+        api_key: settings.api_key.trim().to_string(),
+    })
+}
+
+pub fn stt_settings() -> Result<SttSettings, String> {
+    read_config(SttSettings::from_config)
+}
+
+fn save_stt_settings_at(path: &Path, settings: SttSettings) -> Result<(), String> {
+    let settings = validate_stt_settings(settings)?;
+    with_config_at(path, |config| {
+        config.provider = Some(settings.provider);
+        config.stt_base_url = Some(settings.base_url);
+        config.stt_model = Some(settings.model);
+        config.stt_api_key = Some(settings.api_key).filter(|key| !key.is_empty());
     })
 }
 
@@ -436,6 +541,23 @@ pub async fn save_hotkey(hotkey: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn save_stt_settings(settings: SttSettings) -> Result<(), String> {
+    let _guard = config_mutex().lock().unwrap();
+    let provider = settings.provider.clone();
+    let result = save_stt_settings_at(&get_config_path(), settings);
+    match &result {
+        Ok(()) => log::info!("[config] transcription provider saved ({provider})"),
+        Err(error) => log::error!("[config] transcription provider save failed: {error}"),
+    }
+    result
+}
+
+#[tauri::command]
+pub async fn get_stt_settings() -> Result<SttSettings, String> {
+    stt_settings()
+}
+
+#[tauri::command]
 pub async fn get_hotkey() -> Result<Option<String>, String> {
     read_config(|config| config.hotkey.clone())
 }
@@ -582,6 +704,157 @@ mod tests {
         assert_eq!(config.accessibility_cleanup_generation, Some(0));
         assert!(config.api_key.is_none());
         assert!(config.installed_version.is_none());
+    }
+
+    #[test]
+    fn stt_settings_default_to_gladia_with_ollama_endpoint() {
+        let settings = SttSettings::from_config(&Config::default());
+        assert_eq!(
+            settings,
+            SttSettings {
+                provider: "gladia".to_string(),
+                base_url: "http://localhost:11434/v1".to_string(),
+                model: "gemma4:e4b".to_string(),
+                api_key: String::new(),
+            }
+        );
+        let json = serde_json::to_string(&Config::default()).unwrap();
+        assert!(!json.contains("stt_api_key"));
+    }
+
+    #[test]
+    fn old_config_without_provider_fields_loads_with_defaults() {
+        let dir = TestConfigDir::new();
+        let path = dir.config_path();
+        // Shape of a config written before the provider setting existed.
+        fs::write(
+            &path,
+            r#"{"api_key":"gladia-secret","hotkey":"Fn","languages":["en","es"],"endpointing":0.3}"#,
+        )
+        .unwrap();
+
+        let config = load_config_from_path(&path).unwrap();
+        let settings = SttSettings::from_config(&config);
+        assert_eq!(settings.provider, "gladia");
+        assert_eq!(settings.base_url, DEFAULT_STT_BASE_URL);
+        assert_eq!(settings.model, DEFAULT_STT_MODEL);
+        assert_eq!(settings.api_key, "");
+        assert_eq!(config.api_key.as_deref(), Some("gladia-secret"));
+        assert_eq!(config.endpointing, Some(0.3));
+    }
+
+    #[test]
+    fn explicit_null_provider_fields_are_filled_on_load() {
+        let mut config: Config = serde_json::from_str(
+            r#"{"provider":null,"stt_base_url":null,"stt_model":null,"stt_api_key":null}"#,
+        )
+        .unwrap();
+        config.fill_defaults();
+        assert_eq!(config.provider.as_deref(), Some("gladia"));
+        assert_eq!(config.stt_base_url.as_deref(), Some(DEFAULT_STT_BASE_URL));
+        assert_eq!(config.stt_model.as_deref(), Some(DEFAULT_STT_MODEL));
+        assert!(config.stt_api_key.is_none());
+    }
+
+    fn stt(provider: &str, base_url: &str, model: &str, api_key: &str) -> SttSettings {
+        SttSettings {
+            provider: provider.to_string(),
+            base_url: base_url.to_string(),
+            model: model.to_string(),
+            api_key: api_key.to_string(),
+        }
+    }
+
+    #[test]
+    fn validate_stt_settings_normalizes_input() {
+        assert_eq!(
+            validate_stt_settings(stt(
+                " openai_compat ",
+                " https://api.groq.com/openai/v1/ ",
+                " whisper-large-v3 ",
+                " gsk_x "
+            )),
+            Ok(stt(
+                "openai_compat",
+                "https://api.groq.com/openai/v1",
+                "whisper-large-v3",
+                "gsk_x"
+            ))
+        );
+    }
+
+    #[test]
+    fn validate_stt_settings_rejects_bad_input() {
+        for bad in [
+            stt("whisper", DEFAULT_STT_BASE_URL, "m", ""),
+            stt("openai_compat", "localhost:11434/v1", "m", ""),
+            stt("openai_compat", "ftp://localhost/v1", "m", ""),
+            stt("openai_compat", "not a url", "m", ""),
+            stt("openai_compat", "", "m", ""),
+            stt("openai_compat", DEFAULT_STT_BASE_URL, "  ", ""),
+        ] {
+            assert!(validate_stt_settings(bad.clone()).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn saving_stt_settings_round_trips_and_preserves_gladia_key() {
+        let dir = TestConfigDir::new();
+        let path = dir.config_path();
+        write_config_to_path(
+            &path,
+            &Config {
+                api_key: Some("gladia-secret".to_string()),
+                ..Config::default()
+            },
+        )
+        .unwrap();
+
+        save_stt_settings_at(
+            &path,
+            stt(
+                "openai_compat",
+                "http://localhost:11434/v1/",
+                "gemma4:e4b",
+                "",
+            ),
+        )
+        .unwrap();
+        let loaded = load_config_from_path(&path).unwrap();
+        assert_eq!(
+            SttSettings::from_config(&loaded),
+            stt(
+                "openai_compat",
+                "http://localhost:11434/v1",
+                "gemma4:e4b",
+                ""
+            )
+        );
+        assert!(loaded.stt_api_key.is_none());
+        assert_eq!(loaded.api_key.as_deref(), Some("gladia-secret"));
+
+        // Invalid input is rejected and leaves the file untouched.
+        assert!(save_stt_settings_at(&path, stt("bogus", "x", "", "")).is_err());
+        assert_eq!(
+            SttSettings::from_config(&load_config_from_path(&path).unwrap()).provider,
+            "openai_compat"
+        );
+    }
+
+    #[test]
+    fn batch_settings_omit_blank_key() {
+        assert_eq!(
+            stt("openai_compat", "http://h/v1", "m", "")
+                .batch_settings()
+                .api_key,
+            None
+        );
+        assert_eq!(
+            stt("openai_compat", "http://h/v1", "m", "k")
+                .batch_settings()
+                .api_key,
+            Some("k".to_string())
+        );
     }
 
     #[test]

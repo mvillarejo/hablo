@@ -14,6 +14,7 @@ export function HomeView({
   apiKeyDisplayValue,
   isApiKeyLocked,
   hasSavedApiKey,
+  showApiKeyField = true,
   isTestingApiKey,
   onChangeApiKey,
   onSaveApiKey,
@@ -35,6 +36,7 @@ export function HomeView({
   apiKeyDisplayValue: string;
   isApiKeyLocked: boolean;
   hasSavedApiKey: boolean;
+  showApiKeyField?: boolean;
   isTestingApiKey: boolean;
   onChangeApiKey: (v: string) => void;
   onSaveApiKey: () => void;
@@ -89,21 +91,23 @@ export function HomeView({
         </div>
       )}
 
-      <div className="home-api-slot">
-        <details className="home-api-spoiler" open={!isApiKeyLocked}>
-          <summary>Edit API key</summary>
-          <div className="home-api-section">
-            <p className="home-api-section-label">API key</p>
-            <ApiKeyField
-              displayValue={apiKeyDisplayValue}
-              isLocked={isApiKeyLocked}
-              isTesting={isTestingApiKey}
-              onChangeKey={onChangeApiKey}
-              onSave={onSaveApiKey}
-            />
-          </div>
-        </details>
-      </div>
+      {showApiKeyField && (
+        <div className="home-api-slot">
+          <details className="home-api-spoiler" open={!isApiKeyLocked}>
+            <summary>Edit API key</summary>
+            <div className="home-api-section">
+              <p className="home-api-section-label">API key</p>
+              <ApiKeyField
+                displayValue={apiKeyDisplayValue}
+                isLocked={isApiKeyLocked}
+                isTesting={isTestingApiKey}
+                onChangeKey={onChangeApiKey}
+                onSave={onSaveApiKey}
+              />
+            </div>
+          </details>
+        </div>
+      )}
 
       {errorMessage && !isRecording && !isProcessing && (
         <div className="permission-banner permission-banner--constrained">

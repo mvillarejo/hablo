@@ -10,6 +10,7 @@ import { AppSettingsView } from "../components/AppSettingsView";
 import { DEFAULT_CUSTOM_VOCABULARY } from "../lib/customVocabulary";
 import { DEFAULT_DICTATION_STATS } from "../lib/dictationStats";
 import { EUROPEAN_LANGUAGES } from "../lib/languages";
+import { DEFAULT_STT_SETTINGS, type SttSettings } from "../lib/sttProvider";
 import type { AppSettings, TranscriptionHistoryPage } from "../types";
 
 const noop = () => {};
@@ -120,6 +121,12 @@ function ScreenFrame({
 
 export function ScreenshotGallery() {
   const [settings, setSettings] = useState<AppSettings>(MOCK_SETTINGS);
+  const [sttSettings, setSttSettings] =
+    useState<SttSettings>(DEFAULT_STT_SETTINGS);
+  const [localSttSettings, setLocalSttSettings] = useState<SttSettings>({
+    ...DEFAULT_STT_SETTINGS,
+    provider: "openai_compat",
+  });
   const languageDropdownRef = useRef<HTMLDivElement>(null);
   const activationDropdownRef = useRef<HTMLDivElement>(null);
   const audioDeviceDropdownRef = useRef<HTMLDivElement>(null);
@@ -151,6 +158,7 @@ export function ScreenshotGallery() {
             isTesting={false}
             onChangeKey={noop}
             onSave={noop}
+            onUseLocalModel={noop}
           />
         </AppShell>
       </ScreenFrame>
@@ -330,6 +338,37 @@ export function ScreenshotGallery() {
             setLanguageSearch={noop}
             filteredLanguageOptions={filteredLanguageOptions}
             selectedLanguageSummary="English, French"
+            sttSettings={sttSettings}
+            setSttSettings={setSttSettings}
+            onDone={noop}
+          />
+        </AppShell>
+      </ScreenFrame>
+
+      <ScreenFrame
+        id="wrap-07b-transcription-settings-local"
+        label="07b Transcription Settings (Local model)"
+      >
+        <AppShell
+          id="07b-transcription-settings-local"
+          activeScreen="dictation"
+        >
+          <TranscriptionSettingsView
+            settings={{ ...settings, languages: ["en"] }}
+            setSettings={
+              setSettings as React.Dispatch<React.SetStateAction<AppSettings>>
+            }
+            languageDropdownOpen={false}
+            setLanguageDropdownOpen={noop}
+            languageDropdownRef={languageDropdownRef}
+            handleOpenDropdown={noop}
+            handleLanguageToggle={noop}
+            languageSearch=""
+            setLanguageSearch={noop}
+            filteredLanguageOptions={filteredLanguageOptions}
+            selectedLanguageSummary="English"
+            sttSettings={localSttSettings}
+            setSttSettings={setLocalSttSettings}
             onDone={noop}
           />
         </AppShell>
@@ -398,6 +437,8 @@ export function ScreenshotGallery() {
             setLanguageSearch={noop}
             filteredLanguageOptions={filteredLanguageOptions}
             selectedLanguageSummary="English, French"
+            sttSettings={sttSettings}
+            setSttSettings={setSttSettings}
             onDone={noop}
           />
         </AppShell>
