@@ -207,6 +207,114 @@ mod macos_fn {
             }
         }
 
+        /// Start a tap on one non-modifier key (macOS virtual `keycode`). Its KeyDown/
+        /// KeyUp events are swallowed so the key never types, and autorepeat KeyDowns
+        /// are dropped so holding it yields exactly one press and one release.
+        /// Needs a filtering (non-listen-only) CGEventTap, hence Accessibility.
+        pub fn start_key<F: Fn(bool) + Send + Sync + 'static>(
+            keycode: u16,
+            callback: F,
+        ) -> Result<Self, String> {
+            let running = Arc::new(AtomicBool::new(true));
+            let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+            let running_clone = running.clone();
+            let thread = std::thread::spawn(move || {
+                Self::run_key_tap(keycode, callback, running_clone, tx);
+            });
+
+            let result = rx
+                .recv_timeout(Duration::from_secs(3))
+                .map_err(|_| "Timeout waiting for key tap to initialize".to_string())?;
+
+            #[allow(clippy::arc_with_non_send_sync)]
+            let ns_monitor = Arc::new(std::sync::Mutex::new(None));
+            result.map(|()| Self {
+                running,
+                thread: Some(thread),
+                ns_monitor,
+            })
+        }
+
+        fn run_key_tap<F: Fn(bool) + Send + Sync + 'static>(
+            keycode: u16,
+            cb: F,
+            running: Arc<AtomicBool>,
+            tx: std::sync::mpsc::Sender<Result<(), String>>,
+        ) {
+            use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
+            use core_graphics::event::{
+                CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
+                CGEventType, EventField,
+            };
+
+            let was_down = AtomicBool::new(false);
+            let tap = CGEventTap::new(
+                CGEventTapLocation::Session,
+                CGEventTapPlacement::HeadInsertEventTap,
+                CGEventTapOptions::Default,
+                vec![CGEventType::KeyDown, CGEventType::KeyUp],
+                move |_proxy, event_type, event: &CGEvent| {
+                    let key_down = match event_type {
+                        CGEventType::KeyDown => true,
+                        CGEventType::KeyUp => false,
+                        CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
+                            log::warn!("[hotkey] key tap disabled by macOS; re-enabling");
+                            return None;
+                        }
+                        _ => return None,
+                    };
+                    if event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
+                        != i64::from(keycode)
+                    {
+                        return None;
+                    }
+                    let autorepeat =
+                        event.get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT) != 0;
+                    let prev = was_down.load(Ordering::SeqCst);
+                    if let Some(pressed) = super::key_edge(key_down, autorepeat, prev) {
+                        was_down.store(pressed, Ordering::SeqCst);
+                        cb(pressed);
+                    }
+                    // Swallow every event for the hotkey (autorepeats too) so it never
+                    // types. core-graphics 0.24 treats a `None` return as pass-through
+                    // and can't return NULL, so the event is nulled out instead.
+                    event.set_type(CGEventType::Null);
+                    None
+                },
+            );
+            let tap = match tap {
+                Ok(tap) => tap,
+                Err(()) => {
+                    tx.send(Err(
+                        "CGEventTap::new failed — Accessibility permission required".into(),
+                    ))
+                    .ok();
+                    return;
+                }
+            };
+
+            unsafe {
+                let source = tap
+                    .mach_port
+                    .create_runloop_source(0)
+                    .expect("failed to create runloop source");
+                CFRunLoop::get_current().add_source(&source, kCFRunLoopCommonModes);
+                tap.enable();
+            }
+            tx.send(Ok(())).ok();
+
+            while running.load(Ordering::SeqCst) {
+                CFRunLoop::run_in_mode(
+                    unsafe { core_foundation::runloop::kCFRunLoopDefaultMode },
+                    Duration::from_millis(250),
+                    false,
+                );
+                // macOS disables a filtering tap after a callback timeout or certain
+                // user input; enabling an already-enabled tap is a no-op.
+                tap.enable();
+            }
+        }
+
         pub fn stop(&mut self) {
             self.running.store(false, Ordering::SeqCst);
             if let Some(handle) = self.thread.take() {
@@ -270,6 +378,9 @@ impl HotkeyManager {
         if let Some(mask) = single_modifier_mask(hotkey) {
             log::info!("[hotkey] using modifier tap for {hotkey:?} (mask=0x{mask:x})");
             self.register_modifier_tap(hotkey, mask, app_handle)
+        } else if let Some(keycode) = bare_key_keycode(hotkey) {
+            log::info!("[hotkey] using key tap for {hotkey:?} (keycode=0x{keycode:x})");
+            self.register_key_tap(hotkey, keycode, app_handle)
         } else {
             log::info!("[hotkey] using global-shortcut plugin for {hotkey:?}");
             self.register_modifier_key(hotkey, app_handle)
@@ -332,6 +443,30 @@ impl HotkeyManager {
         Ok(())
     }
 
+    #[cfg(target_os = "macos")]
+    fn register_key_tap(
+        &self,
+        hotkey: &str,
+        keycode: u16,
+        app_handle: AppHandle,
+    ) -> Result<(), String> {
+        let hotkey_label = hotkey.to_string();
+        let tap = macos_fn::FnKeyTap::start_key(keycode, move |pressed| {
+            let state = if pressed { "pressed" } else { "released" };
+            log::info!("[hotkey] key tap: {state} hotkey={hotkey_label:?} keycode=0x{keycode:x}");
+            let event = if pressed {
+                "hotkey-pressed"
+            } else {
+                "hotkey-released"
+            };
+            let _ = app_handle.emit(event, ());
+        })?;
+
+        let mut fn_tap = self.fn_tap.lock().unwrap();
+        *fn_tap = Some(tap);
+        Ok(())
+    }
+
     fn register_modifier_key(&self, key: &str, app_handle: AppHandle) -> Result<(), String> {
         use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
 
@@ -382,6 +517,8 @@ impl HotkeyManager {
 fn registration_method(hotkey: &str) -> &'static str {
     if single_modifier_mask(hotkey).is_some() {
         "modifier-tap"
+    } else if bare_key_keycode(hotkey).is_some() {
+        "key-tap"
     } else if hotkey.contains('+') {
         "global-shortcut (combo)"
     } else {
@@ -424,6 +561,47 @@ fn single_modifier_mask(hotkey: &str) -> Option<u64> {
     Some(mask)
 }
 
+/// Allowlist of non-modifier keys that may be bound on their own (no modifier),
+/// mapped to their macOS virtual keycodes (`kVK_*` in HIToolbox Events.h). Keys
+/// that type text in normal use (letters, digits, Space…) are deliberately absent.
+#[cfg(target_os = "macos")]
+fn bare_key_keycode(hotkey: &str) -> Option<u16> {
+    let keycode = match hotkey {
+        "Section" | "§" => 0x0a, // kVK_ISO_Section
+        "F13" => 0x69,
+        "F14" => 0x6b,
+        "F15" => 0x71,
+        "F16" => 0x6a,
+        "F17" => 0x40,
+        "F18" => 0x4f,
+        "F19" => 0x50,
+        _ => return None,
+    };
+    Some(keycode)
+}
+
+/// Hotkey edge for an event on the watched key: `Some(true)` on the first KeyDown,
+/// `Some(false)` on the KeyUp that ends it, `None` for autorepeat KeyDowns and
+/// KeyUps with no matching press. A hold therefore gives exactly one start and stop.
+#[cfg(target_os = "macos")]
+fn key_edge(key_down: bool, autorepeat: bool, was_down: bool) -> Option<bool> {
+    match (key_down, autorepeat, was_down) {
+        (true, false, false) => Some(true),
+        (false, _, true) => Some(false),
+        _ => None,
+    }
+}
+
+/// Canonical form to persist: the literal "§" is stored as the layout-independent
+/// "Section" token. Anything else is returned unchanged.
+pub fn canonical_hotkey(hotkey: &str) -> String {
+    if hotkey == "§" {
+        "Section".to_string()
+    } else {
+        hotkey.to_string()
+    }
+}
+
 /// Validate a hotkey string before persisting or registering it.
 pub fn validate_hotkey(hotkey: &str) -> Result<(), String> {
     let hotkey = hotkey.trim();
@@ -439,7 +617,7 @@ pub fn validate_hotkey(hotkey: &str) -> Result<(), String> {
     }
 
     #[cfg(target_os = "macos")]
-    if single_modifier_mask(hotkey).is_some() {
+    if single_modifier_mask(hotkey).is_some() || bare_key_keycode(hotkey).is_some() {
         return Ok(());
     }
 
@@ -550,5 +728,87 @@ mod validation_tests {
     #[test]
     fn rejects_unknown_token() {
         assert!(validate_hotkey("NotARealHotkey").is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accepts_allowlisted_bare_keys_on_macos() {
+        for hotkey in ["Section", "§", "F13", "F19"] {
+            assert!(validate_hotkey(hotkey).is_ok(), "{hotkey}");
+        }
+    }
+
+    #[test]
+    fn rejects_bare_typing_keys() {
+        for hotkey in ["A", "a", "1", "0", "Space", "Enter", "F12", ";"] {
+            assert!(validate_hotkey(hotkey).is_err(), "{hotkey}");
+        }
+    }
+
+    #[test]
+    fn canonicalizes_section_alias() {
+        use super::canonical_hotkey;
+        assert_eq!(canonical_hotkey("§"), "Section");
+        assert_eq!(canonical_hotkey("Section"), "Section");
+        assert_eq!(canonical_hotkey("Cmd+§"), "Cmd+§");
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod bare_key_tests {
+    use super::{bare_key_keycode, key_edge, registration_method};
+
+    #[test]
+    fn section_maps_to_iso_section_keycode() {
+        assert_eq!(bare_key_keycode("Section"), Some(0x0a));
+        assert_eq!(bare_key_keycode("§"), Some(0x0a));
+        assert_eq!(bare_key_keycode("F13"), Some(0x69));
+        assert_eq!(bare_key_keycode("A"), None);
+        assert_eq!(bare_key_keycode("Space"), None);
+    }
+
+    #[test]
+    fn registration_method_reports_path() {
+        assert_eq!(registration_method("Section"), "key-tap");
+        assert_eq!(registration_method("§"), "key-tap");
+        assert_eq!(registration_method("F15"), "key-tap");
+        assert_eq!(registration_method("Fn"), "modifier-tap");
+        assert_eq!(registration_method("Ctrl+Space"), "global-shortcut (combo)");
+    }
+
+    /// Feed (key_down, autorepeat) events through key_edge, tracking state like the tap.
+    fn edges(events: &[(bool, bool)]) -> Vec<bool> {
+        let mut down = false;
+        let mut out = Vec::new();
+        for &(key_down, autorepeat) in events {
+            if let Some(pressed) = key_edge(key_down, autorepeat, down) {
+                down = pressed;
+                out.push(pressed);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn hold_with_autorepeat_gives_one_start_and_one_stop() {
+        let hold = [
+            (true, false),
+            (true, true),
+            (true, true),
+            (true, true),
+            (false, false),
+        ];
+        assert_eq!(edges(&hold), vec![true, false]);
+    }
+
+    #[test]
+    fn two_taps_give_two_presses_for_toggle_mode() {
+        let taps = [(true, false), (false, false), (true, false), (false, false)];
+        assert_eq!(edges(&taps), vec![true, false, true, false]);
+    }
+
+    #[test]
+    fn stray_release_and_repeat_without_press_are_ignored() {
+        assert_eq!(edges(&[(false, false), (true, true)]), Vec::<bool>::new());
     }
 }

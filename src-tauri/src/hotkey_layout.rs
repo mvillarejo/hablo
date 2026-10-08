@@ -52,6 +52,16 @@ fn stable_logical_to_code(key: &str) -> Option<Code> {
         "F10" => Some(F10),
         "F11" => Some(F11),
         "F12" => Some(F12),
+        "F13" => Some(F13),
+        "F14" => Some(F14),
+        "F15" => Some(F15),
+        "F16" => Some(F16),
+        "F17" => Some(F17),
+        "F18" => Some(F18),
+        "F19" => Some(F19),
+        // The ISO § key (top-left on Mac ISO keyboards). Stored as a stable token so
+        // it doesn't depend on what the active layout prints there.
+        "SECTION" | "§" => Some(IntlBackslash),
         _ => None,
     }
 }
@@ -533,6 +543,14 @@ mod tests {
         assert_eq!(resolve_logical_key("Space").unwrap(), Code::Space);
         assert_eq!(resolve_logical_key("F5").unwrap(), Code::F5);
         assert_eq!(resolve_logical_key("Up").unwrap(), Code::ArrowUp);
+    }
+
+    #[test]
+    fn section_token_and_alias_resolve_to_intl_backslash() {
+        assert_eq!(resolve_logical_key("Section").unwrap(), Code::IntlBackslash);
+        assert_eq!(resolve_logical_key("§").unwrap(), Code::IntlBackslash);
+        assert_eq!(resolve_logical_key("F13").unwrap(), Code::F13);
+        assert_eq!(resolve_logical_key("F19").unwrap(), Code::F19);
     }
 
     #[test]

@@ -94,6 +94,34 @@ const SIDE_TOKEN_TO_BASE: Record<string, string> = {
   ShiftRight: "Shift",
 };
 
+// Non-modifier keys that may be bound on their own (macOS only), keyed by the
+// physical KeyboardEvent.code so the token doesn't depend on the layout. Keys
+// that type text in normal use (letters, digits, Space…) are excluded on purpose.
+const BARE_KEY_FROM_CODE: Record<string, string> = {
+  IntlBackslash: "Section", // § on Mac ISO keyboards
+  F13: "F13",
+  F14: "F14",
+  F15: "F15",
+  F16: "F16",
+  F17: "F17",
+  F18: "F18",
+  F19: "F19",
+};
+
+const KEY_SYMBOLS: Record<string, string> = {
+  Section: "§",
+};
+
+/** Stable token for a key that can be a hotkey on its own (e.g. § → "Section"), else null. */
+export function bareKeyToken(event: KeyboardEvent): string | null {
+  return BARE_KEY_FROM_CODE[event.code] ?? null;
+}
+
+/** True for a hotkey that is a single allowlisted non-modifier key. */
+export function isBareKeyToken(token: string): boolean {
+  return Object.values(BARE_KEY_FROM_CODE).includes(token);
+}
+
 /** Returns the side-qualified token for a modifier KeyboardEvent.code, else null. */
 export function modifierSideToken(code: string): string | null {
   return MODIFIER_CODE_TO_SIDE_TOKEN[code] ?? null;
@@ -183,7 +211,7 @@ export function formatKeySymbol(key: string): string {
     const side = key.endsWith("Right") ? "R" : "L";
     return `${MODIFIER_SYMBOLS[base]}${side}`;
   }
-  return MODIFIER_SYMBOLS[key] ?? key;
+  return MODIFIER_SYMBOLS[key] ?? KEY_SYMBOLS[key] ?? key;
 }
 
 export function sortKeys(keys: string[]): string[] {

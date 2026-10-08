@@ -105,6 +105,12 @@ export function AppSettingsView({
                 {isMac && (
                   <li>A single modifier (left and right are distinct)</li>
                 )}
+                {isMac && (
+                  <li>
+                    § or F13–F19 on its own (while § is the trigger key, it
+                    won't type §)
+                  </li>
+                )}
                 <li>Press Escape to cancel</li>
               </ul>
             </InfoTooltip>
