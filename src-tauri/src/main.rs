@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{async_runtime::spawn, Emitter, Manager, State};
 use tokio::sync::Mutex as TokioMutex;
@@ -25,6 +25,7 @@ mod utterance_cleaner;
 mod vocabulary;
 
 use audio::{AudioCapture, AudioDeviceInfo, AudioDeviceSelection};
+use config::{NewProfile, Profile, ProfileSettings, ProfilesState};
 use gladia::GladiaClient;
 use history::TranscriptionHistoryPage;
 use hotkey::HotkeyManager;
@@ -192,16 +193,15 @@ fn greet(name: &str) -> String {
     format!("Hello, {}!", name)
 }
 
+/// Opens a session with the **active profile** as it is right now. Switching
+/// profile mid-dictation does not touch the live session; it applies here, on
+/// the next session.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // Tauri commands expose a flat, backwards-compatible IPC payload.
 async fn init_gladia_session(
-    api_key: String,
     languages: Option<Vec<String>>,
     device_name: Option<String>,
     device_selection: Option<AudioDeviceSelection>,
-    code_switching: Option<bool>,
     custom_vocabulary: Option<Vec<CustomVocabEntry>>,
-    endpointing: Option<f64>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     // Preparation is the single source of truth for the capture/Gladia rate;
@@ -212,37 +212,25 @@ async fn init_gladia_session(
         .await
         .map_err(|error| format!("Failed to join audio preparation task: {error}"))?
         .map_err(|error| error.to_string())?;
-    let stt = config::stt_settings()?;
-    let provider = Provider::from_config(&stt.provider);
-    log::info!(
-        "initialising transcription session (provider={:?}, region={}, sample_rate={}, code_switching={})",
-        provider,
-        state.region,
-        sample_rate,
-        code_switching.unwrap_or(false)
-    );
-    let mut transcriber = state.transcriber.lock().await;
-    transcriber.ensure_provider(provider).await;
-    transcriber.set_audio_format(sample_rate, 1, 16).await;
+    let profile = config::active_profile()?;
+    let provider = Provider::for_profile(&profile.settings);
     let custom_vocabulary = custom_vocabulary
         .filter(|entries| !entries.is_empty())
         .or_else(|| config::get_custom_vocabulary().ok())
         .unwrap_or_default();
-    let endpointing = match endpointing {
-        Some(endpointing) => endpointing,
-        None => config::endpointing()?,
-    };
-    transcriber
-        .init_session(SessionParams {
-            api_key,
-            languages,
-            code_switching: code_switching.unwrap_or(false),
-            custom_vocabulary,
-            endpointing,
-            region: state.region,
-            batch: stt.batch_settings(),
-        })
-        .await
+    let params = SessionParams::for_profile(&profile, languages, custom_vocabulary, state.region);
+    log::info!(
+        "initialising transcription session (profile={}, provider={:?}, region={}, sample_rate={}, code_switching={})",
+        profile.id,
+        provider,
+        params.region,
+        sample_rate,
+        params.code_switching
+    );
+    let mut transcriber = state.transcriber.lock().await;
+    transcriber.ensure_provider(provider).await;
+    transcriber.set_audio_format(sample_rate, 1, 16).await;
+    transcriber.init_session(params).await
 }
 
 #[tauri::command]
@@ -253,11 +241,158 @@ async fn test_gladia_connection(api_key: String) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Check an OpenAI-compatible endpoint is reachable and serves `settings.model`.
+/// Check a saved profile works: Gladia accepts its key, or the OpenAI-compatible
+/// endpoint is reachable and serves its model.
 #[tauri::command]
-async fn test_stt_connection(settings: config::SttSettings) -> Result<String, String> {
-    let settings = config::validate_stt_settings(settings)?;
-    batch_stt::test_connection(&settings.batch_settings()).await
+async fn test_profile_connection(profile_id: String) -> Result<String, String> {
+    test_profile(&config::profile_by_id(&profile_id)?).await
+}
+
+async fn test_profile(profile: &Profile) -> Result<String, String> {
+    match &profile.settings {
+        ProfileSettings::Gladia { api_key, .. } => {
+            if api_key.trim().is_empty() {
+                return Err("Add a Gladia API key first".to_string());
+            }
+            match GladiaClient::new().test_connection(api_key).await {
+                Ok(true) => Ok("Connected. Gladia accepted the API key.".to_string()),
+                Ok(false) => Err("Gladia rejected the API key".to_string()),
+                Err(error) => Err(format!("Could not reach Gladia: {error}")),
+            }
+        }
+        ProfileSettings::OpenAiCompat { .. } => {
+            let settings = profile
+                .settings
+                .batch_settings()
+                .expect("OpenAI-compatible profiles have batch settings");
+            batch_stt::test_connection(&settings).await
+        }
+    }
+}
+
+// --- Transcription profiles ---
+
+const TRAY_PROFILE_PREFIX: &str = "profile:";
+
+#[tauri::command]
+async fn list_profiles() -> Result<ProfilesState, String> {
+    config::profiles_state()
+}
+
+#[tauri::command]
+async fn create_profile(
+    profile: NewProfile,
+    app: tauri::AppHandle,
+) -> Result<ProfilesState, String> {
+    profiles_changed(&app, config::create_profile(profile))
+}
+
+#[tauri::command]
+async fn update_profile(profile: Profile, app: tauri::AppHandle) -> Result<ProfilesState, String> {
+    profiles_changed(&app, config::update_profile(profile))
+}
+
+#[tauri::command]
+async fn delete_profile(
+    profile_id: String,
+    app: tauri::AppHandle,
+) -> Result<ProfilesState, String> {
+    profiles_changed(&app, config::delete_profile(&profile_id))
+}
+
+#[tauri::command]
+async fn set_active_profile(
+    profile_id: String,
+    app: tauri::AppHandle,
+) -> Result<ProfilesState, String> {
+    profiles_changed(&app, config::set_active_profile(&profile_id))
+}
+
+/// Onboarding / Home key field: store a Gladia key and make that profile active.
+#[tauri::command]
+async fn save_gladia_key(api_key: String, app: tauri::AppHandle) -> Result<ProfilesState, String> {
+    profiles_changed(&app, config::save_gladia_key(&api_key))
+}
+
+/// After a successful profile write: rebuild the tray menu and tell the UI, so
+/// a change made in either place shows up in the other.
+fn profiles_changed(
+    app: &tauri::AppHandle,
+    result: Result<ProfilesState, String>,
+) -> Result<ProfilesState, String> {
+    match &result {
+        Ok(state) => {
+            log::info!(
+                "[profiles] saved ({} profiles, active={})",
+                state.profiles.len(),
+                state.active_profile_id
+            );
+            if let Err(error) = refresh_tray_menu(app, state) {
+                log::warn!("[tray] failed to rebuild menu: {error}");
+            }
+            let _ = app.emit("profiles-changed", state.clone());
+        }
+        Err(error) => log::warn!("[profiles] write rejected: {error}"),
+    }
+    result
+}
+
+fn build_tray_menu(
+    app: &tauri::AppHandle,
+    profiles: &ProfilesState,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let show_i = MenuItem::with_id(app, "show", "Open App", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let profile_items = profiles
+        .profiles
+        .iter()
+        .map(|profile| {
+            CheckMenuItem::with_id(
+                app,
+                format!("{TRAY_PROFILE_PREFIX}{}", profile.id),
+                &profile.name,
+                true,
+                profile.id == profiles.active_profile_id,
+                None::<&str>,
+            )
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let profile_refs: Vec<&dyn IsMenuItem<tauri::Wry>> = profile_items
+        .iter()
+        .map(|item| item as &dyn IsMenuItem<tauri::Wry>)
+        .collect();
+    let provider_menu = Submenu::with_items(app, "Provider", true, &profile_refs)?;
+
+    #[cfg(all(target_os = "macos", debug_assertions))]
+    {
+        let reset_ax_i = MenuItem::with_id(
+            app,
+            "reset_ax",
+            "Reset Accessibility Permission (dev)",
+            true,
+            None::<&str>,
+        )?;
+        Menu::with_items(app, &[&show_i, &provider_menu, &reset_ax_i, &quit_i])
+    }
+    #[cfg(not(all(target_os = "macos", debug_assertions)))]
+    Menu::with_items(app, &[&show_i, &provider_menu, &quit_i])
+}
+
+fn refresh_tray_menu(app: &tauri::AppHandle, profiles: &ProfilesState) -> Result<(), String> {
+    let menu = build_tray_menu(app, profiles).map_err(|e| e.to_string())?;
+    tray_handle(app)?
+        .set_menu(Some(menu))
+        .map_err(|e| e.to_string())
+}
+
+fn handle_tray_profile_click(app: &tauri::AppHandle, profile_id: &str) {
+    let result = profiles_changed(app, config::set_active_profile(profile_id));
+    if result.is_err() {
+        // Re-sync the checkmarks with what is actually saved.
+        if let Ok(state) = config::profiles_state() {
+            let _ = refresh_tray_menu(app, &state);
+        }
+    }
 }
 
 #[tauri::command]
@@ -1223,22 +1358,14 @@ fn main() {
                 }
             }
 
-            let show_i = MenuItem::with_id(app, "show", "Open App", true, None::<&str>)?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-
-            #[cfg(all(target_os = "macos", debug_assertions))]
-            let reset_ax_i = MenuItem::with_id(
-                app,
-                "reset_ax",
-                "Reset Accessibility Permission (dev)",
-                true,
-                None::<&str>,
-            )?;
-
-            #[cfg(all(target_os = "macos", debug_assertions))]
-            let menu = Menu::with_items(app, &[&show_i, &reset_ax_i, &quit_i])?;
-            #[cfg(not(all(target_os = "macos", debug_assertions)))]
-            let menu = Menu::with_items(app, &[&show_i, &quit_i])?;
+            let profiles = config::profiles_state().unwrap_or_else(|error| {
+                log::error!("[tray] failed to load profiles for the menu: {error}");
+                ProfilesState {
+                    profiles: vec![],
+                    active_profile_id: String::new(),
+                }
+            });
+            let menu = build_tray_menu(app.handle(), &profiles)?;
 
             let idle_icon = tray_icon_from_bytes(TRAY_ICON_IDLE)?;
             let _tray = TrayIconBuilder::with_id(TRAY_ID)
@@ -1258,7 +1385,11 @@ fn main() {
                     "quit" => {
                         app.exit(0);
                     }
-                    _ => {}
+                    id => {
+                        if let Some(profile_id) = id.strip_prefix(TRAY_PROFILE_PREFIX) {
+                            handle_tray_profile_click(app, profile_id);
+                        }
+                    }
                 })
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click {
@@ -1291,13 +1422,16 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             greet,
-            config::save_api_key,
-            config::get_api_key,
-            config::delete_api_key,
             config::reset_corrupted_config,
             init_gladia_session,
             test_gladia_connection,
-            test_stt_connection,
+            test_profile_connection,
+            list_profiles,
+            create_profile,
+            update_profile,
+            delete_profile,
+            set_active_profile,
+            save_gladia_key,
             list_transcription_history,
             open_external_url,
             send_audio_chunk,
@@ -1323,14 +1457,10 @@ fn main() {
             config::get_hotkey,
             config::save_language_settings,
             config::get_language_settings,
-            config::save_endpointing,
-            config::get_endpointing,
             config::save_copy_to_clipboard,
             config::get_copy_to_clipboard,
             config::save_activation_mode,
             config::get_activation_mode,
-            config::save_stt_settings,
-            config::get_stt_settings,
             config::save_audio_device_selection,
             config::get_audio_device_selection,
             vocabulary::save_custom_vocabulary,
