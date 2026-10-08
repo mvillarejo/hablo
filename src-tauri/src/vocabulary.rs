@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 
-pub const DEFAULT_VOCAB_TERM: &str = "gladiaflow";
+pub const DEFAULT_VOCAB_TERM: &str = "TTM";
 pub const DEFAULT_VOCAB_TERM_INTENSITY: f64 = 0.4;
 
 fn default_vocab_intensity() -> f64 {
@@ -12,7 +12,7 @@ fn default_vocab_intensity() -> f64 {
 pub fn default_custom_vocabulary() -> Vec<CustomVocabEntry> {
     vec![CustomVocabEntry {
         value: DEFAULT_VOCAB_TERM.to_string(),
-        pronunciations: Some(vec!["gladioflow".to_string(), "gladiaflaw".to_string()]),
+        pronunciations: None,
         language: None,
         intensity: DEFAULT_VOCAB_TERM_INTENSITY,
     }]
@@ -80,7 +80,7 @@ pub async fn export_vocabulary_csv(app: AppHandle, csv: String) -> Result<bool, 
     let mut builder = app
         .dialog()
         .file()
-        .set_file_name("gladiaflow-vocabulary.csv")
+        .set_file_name("ttm-vocabulary.csv")
         .add_filter("CSV", &["csv"]);
     if let Some(downloads) = dirs::download_dir() {
         builder = builder.set_directory(downloads);
@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_custom_vocabulary_contains_gladiaflow() {
+    fn default_custom_vocabulary_contains_ttm() {
         let vocab = default_custom_vocabulary();
         assert_eq!(vocab.len(), 1);
         assert_eq!(vocab[0].value, DEFAULT_VOCAB_TERM);

@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for GladiaFlow",
+  "description": "Default capabilities for TTM",
   "windows": ["main"],
   "permissions": [
     "core:default",

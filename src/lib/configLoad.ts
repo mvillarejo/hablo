@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export const CONFIG_LOAD_ERROR_MESSAGE =
-  "GladiaFlow couldn't read your saved settings. Your API key has not been changed.";
+  "TTM couldn't read your saved settings. Your API key has not been changed.";
 export const CONFIG_RESET_ERROR_MESSAGE =
-  "GladiaFlow couldn't reset your settings. Your original settings file was not deleted.";
+  "TTM couldn't reset your settings. Your original settings file was not deleted.";
 
 export type ApiKeyLoadResult =
   { ok: true; apiKey: string | null } | { ok: false; message: string };

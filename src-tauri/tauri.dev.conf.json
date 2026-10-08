@@ -1,5 +1,5 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "identifier": "io.gladia.gladiaflow.dev",
-  "productName": "GladiaFlow Dev"
+  "identifier": "in.villarejo.ttm.dev",
+  "productName": "TTM Dev"
 }

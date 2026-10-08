@@ -75,7 +75,7 @@ export function HistoryView({
       <div className="history-header">
         <h2 className="setup-title">Transcription History</h2>
         <p className="setup-desc setup-desc--tight">
-          Transcriptions from GladiaFlow on this device.
+          Transcriptions from TTM on this device.
         </p>
 
         <div className="history-toolbar">

@@ -4,7 +4,7 @@ import path from "node:path";
 
 const OUTPUT_DIR =
   process.env.SCREENSHOT_OUTPUT_DIR ??
-  path.join(process.env.HOME, "gladiaflow-screenshots");
+  path.join(process.env.HOME, "ttm-screenshots");
 
 const screensArg = process.argv[2];
 const SCREENS = screensArg
@@ -194,7 +194,7 @@ async function main() {
         await page.locator(".vocab-editor-field input").fill("Unsaved change");
       }
       if (id === "06c-vocabulary-new") {
-        await page.locator(".vocab-editor-field input").fill("gladiaflow");
+        await page.locator(".vocab-editor-field input").fill("ttm");
         await page.getByRole("button", { name: "Save term" }).click();
         await page
           .getByText("This term is already in your vocabulary.")

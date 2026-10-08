@@ -81,18 +81,17 @@ textarea {
 }
 
 .logo-img {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
 }
 
 .logo-wordmark {
-  display: block;
-  height: 16px;
-  width: auto;
-  max-width: 100%;
-  object-fit: contain;
-  object-position: left center;
+  color: var(--text-primary);
+  font-size: var(--font-size-16);
+  font-weight: var(--font-weight-book);
+  letter-spacing: var(--letter-spacing-wider);
+  line-height: 24px;
 }
 
 .nav {
