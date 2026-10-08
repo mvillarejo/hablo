@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="public/assets/gladiaflow-banner.png" alt="GladiaFlow — real-time voice dictation" width="100%" />
+  <h1>TTM</h1>
 
   <p><strong>Fast, accurate voice dictation in any desktop app.</strong></p>
 
   <p>
-    <a href="https://github.com/gladiaio/gladiaflow/releases"><img src="https://img.shields.io/github/v/release/gladiaio/gladiaflow?display_name=tag" alt="Latest release" /></a>
+    <a href="https://github.com/mvillarejo/ttm/releases"><img src="https://img.shields.io/github/v/release/mvillarejo/ttm?display_name=tag" alt="Latest release" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8b5cf6.svg" alt="MIT license" /></a>
     <img src="https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2" />
   </p>
@@ -18,13 +18,13 @@
   </p>
 </div>
 
-GladiaFlow is an open-source desktop app that turns speech into text wherever you type. Hold a hotkey, speak, and the app streams your microphone to the [Gladia Live Transcription API](https://docs.gladia.io/), cleans the result, and pastes it into the focused application.
+TTM is an open-source desktop app that turns speech into text wherever you type. Hold a hotkey, speak, and the app streams your microphone to the [Gladia Live Transcription API](https://docs.gladia.io/), cleans the result, and pastes it into the focused application.
 
 > [!NOTE]
 >
-> GladiaFlow currently supports macOS and Windows. A [Gladia API key](https://app.gladia.io/) is required.
+> TTM currently supports macOS and Windows. A [Gladia API key](https://app.gladia.io/) is required.
 
-## Why GladiaFlow?
+## Why TTM?
 
 - **Dictate anywhere** — paste transcribed speech into editors, browsers, chat apps, and more.
 - **See results live** — partial and final transcripts arrive over a low-latency WebSocket session.
@@ -36,10 +36,10 @@ GladiaFlow is an open-source desktop app that turns speech into text wherever yo
 
 ## Quick start
 
-Download the latest installer from [GitHub Releases](https://github.com/gladiaio/gladiaflow/releases), then:
+Download the latest installer from [GitHub Releases](https://github.com/mvillarejo/ttm/releases), then:
 
-1. Launch GladiaFlow and enter your [Gladia API key](https://app.gladia.io/).
-2. Grant microphone access. On macOS, also grant Accessibility access so GladiaFlow can paste into other apps.
+1. Launch TTM and enter your [Gladia API key](https://app.gladia.io/).
+2. Grant microphone access. On macOS, also grant Accessibility access so TTM can paste into other apps.
 3. Focus any text field and use the activation shortcut:
    - **macOS:** hold <kbd>Fn</kbd> / <kbd>Globe</kbd>
    - **Windows:** hold <kbd>Ctrl</kbd> + <kbd>Space</kbd>
@@ -61,8 +61,8 @@ Windows development also requires the Microsoft C++ Build Tools and WebView2. We
 ### Run locally
 
 ```bash
-git clone https://github.com/gladiaio/gladiaflow.git
-cd gladiaflow
+git clone https://github.com/mvillarejo/ttm.git
+cd ttm
 npm ci
 npm run tauri:dev
 ```
@@ -155,11 +155,11 @@ The release workflow runs for tags matching `v*`, stamps the tag version into th
 
 ## Privacy and data handling
 
-GladiaFlow is a local desktop client. It does not operate its own cloud backend for dictation. When you dictate, microphone audio is sent to Gladia’s Live Transcription API, which is the sole remote processor for that audio.
+TTM is a local desktop client. It does not operate its own cloud backend for dictation. When you dictate, microphone audio is sent to Gladia’s Live Transcription API, which is the sole remote processor for that audio.
 
 | Data | What happens |
 | --- | --- |
-| Microphone audio | During an active dictation session, PCM audio is streamed over WebSocket to the Gladia Live Transcription API. GladiaFlow does not save audio files locally. |
+| Microphone audio | During an active dictation session, PCM audio is streamed over WebSocket to the Gladia Live Transcription API. TTM does not save audio files locally. |
 | Transcripts | Text returns from Gladia. Cleaned transcript text and the Gladia session ID are stored locally in SQLite (`history.db` in the app config directory). |
 | Settings and API key | Stored locally in `config.json` in the user config directory (API key, hotkey, languages, custom vocabulary, and related preferences). |
 | Clipboard | Used transiently to paste transcribed text into the focused app. An optional setting can leave the final transcript on the clipboard. |
@@ -169,7 +169,7 @@ Audio and transcripts processed by Gladia are subject to Gladia’s own policies
 - [Privacy notice](https://www.gladia.io/privacy-notice)
 - [Terms & conditions](https://www.gladia.io/terms-conditions)
 
-Those documents cover retention, subprocessors, and related platform practices. For how GladiaFlow stores data on your machine, see also [SECURITY.md](SECURITY.md).
+Those documents cover retention, subprocessors, and related platform practices. For how TTM stores data on your machine, see also [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
@@ -179,4 +179,6 @@ To report a security vulnerability privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-GladiaFlow is available under the [MIT License](LICENSE). See [TRADEMARKS.md](TRADEMARKS.md) for brand and logo restrictions.
+TTM is a personal fork of [GladiaFlow](https://github.com/gladiaio/gladiaflow) by Gladia, released under the [MIT License](LICENSE). The original copyright notice is kept in LICENSE.
+
+TTM is not an official Gladia product and is not affiliated with or endorsed by Gladia. “Gladia” and “GladiaFlow” are trademarks of Gladia; see [TRADEMARKS.md](TRADEMARKS.md).

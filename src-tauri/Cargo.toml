@@ -1,8 +1,8 @@
 [package]
-name = "gladiaflow"
+name = "ttm"
 version = "0.1.0"
 description = "A Tauri App for real-time voice dictation with Gladia"
-authors = ["Gladia <support@gladia.io>"]
+authors = ["Manuel Villarejo"]
 edition = "2021"
 
 [build-dependencies]

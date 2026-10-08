@@ -5,8 +5,7 @@ export const DEFAULT_VOCAB_INTENSITY = 0.5;
 
 export const DEFAULT_CUSTOM_VOCABULARY: CustomVocabEntry[] = [
   {
-    value: "gladiaflow",
-    pronunciations: ["gladioflow", "gladiaflaw"],
+    value: "TTM",
     intensity: 0.4,
   },
 ];

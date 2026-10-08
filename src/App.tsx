@@ -1778,7 +1778,7 @@ export default function App() {
     return (
       <main className="loading-shell">
         <div className="loading-spinner" />
-        <span className="loading-text">Loading GladiaFlow</span>
+        <span className="loading-text">Loading TTM</span>
       </main>
     );
   }

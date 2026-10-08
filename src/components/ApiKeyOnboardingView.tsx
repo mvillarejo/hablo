@@ -18,7 +18,7 @@ export function ApiKeyOnboardingView({
 }) {
   return (
     <div className="setup-step setup-step-center">
-      <h2 className="setup-title">Welcome to GladiaFlow</h2>
+      <h2 className="setup-title">Welcome to TTM</h2>
       <p className="setup-desc">Enter your Gladia API key to get started.</p>
       <div className="setup-form">
         <ApiKeyField

@@ -49,12 +49,12 @@ const MOCK_HISTORY: TranscriptionHistoryPage = {
   items: [
     {
       id: "1",
-      text: "GladiaFlow makes dictation feel effortless once permissions and your API key are set up.",
+      text: "TTM makes dictation feel effortless once permissions and your API key are set up.",
       created_at: new Date(Date.now() - 3600000).toISOString(),
     },
     {
       id: "2",
-      text: "Custom vocabulary helps with product names like GladiaFlow and internal acronyms.",
+      text: "Custom vocabulary helps with product names like TTM and internal acronyms.",
       created_at: new Date(Date.now() - 86400000).toISOString(),
     },
     {

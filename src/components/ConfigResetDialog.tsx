@@ -50,7 +50,7 @@ export function ConfigResetDialog({
       <h3 id="config-reset-title">Reset all settings?</h3>
       <p id="config-reset-description">
         This resets your API key, shortcut, languages, vocabulary, and app
-        preferences. You will need to set up GladiaFlow again.
+        preferences. You will need to set up TTM again.
       </p>
       <p>
         The unreadable settings file will be kept as a timestamped backup. This

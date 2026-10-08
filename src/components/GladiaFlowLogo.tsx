@@ -4,7 +4,7 @@ export function GladiaFlowLogo({ className }: { className?: string }) {
   return (
     <img
       src={LOGO_SRC}
-      alt="GladiaFlow"
+      alt="TTM"
       className={className ?? "logo-wordmark"}
       draggable={false}
     />

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 /// Bump when a one-time TCC cleanup must re-run for users stuck on a prior migration.
 pub const CURRENT_CLEANUP_GENERATION: u32 = 2;
 
-const CURRENT_TCC_BUNDLE_ID: &str = "io.gladia.gladiaflow";
+const CURRENT_TCC_BUNDLE_ID: &str = "in.villarejo.ttm";
 const LEGACY_TCC_BUNDLE_IDS: &[&str] = &["io.gladiaflow.app"];
 
 /// Legacy bundle ids are best-effort cleanup. Only the current bundle's reset
@@ -281,14 +281,14 @@ mod tests {
 
     #[test]
     fn migration_completes_when_current_bundle_reset_succeeds() {
-        let results = [("io.gladia.gladiaflow", true), ("io.gladiaflow.app", false)];
+        let results = [("in.villarejo.ttm", true), ("io.gladiaflow.app", false)];
 
         assert!(migration_cleanup_succeeded(&results));
     }
 
     #[test]
     fn migration_retries_when_current_bundle_reset_fails() {
-        let results = [("io.gladia.gladiaflow", false), ("io.gladiaflow.app", true)];
+        let results = [("in.villarejo.ttm", false), ("io.gladiaflow.app", true)];
 
         assert!(!migration_cleanup_succeeded(&results));
     }

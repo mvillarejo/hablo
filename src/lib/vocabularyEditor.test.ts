@@ -8,7 +8,7 @@ import {
 } from "./vocabularyEditor";
 
 const entries: CustomVocabEntry[] = [
-  { value: "GladiaFlow", intensity: 0.4 },
+  { value: "TTM", intensity: 0.4 },
   { value: "WebSocket", intensity: 0.5 },
 ];
 
@@ -18,13 +18,13 @@ describe("validateVocabularyTerm", () => {
   });
 
   it("rejects case-insensitive duplicates", () => {
-    expect(validateVocabularyTerm(entries, " gladiaflow ", null)).toBe(
+    expect(validateVocabularyTerm(entries, " ttm ", null)).toBe(
       "This term is already in your vocabulary.",
     );
   });
 
   it("allows the currently edited term", () => {
-    expect(validateVocabularyTerm(entries, "gladiaflow", 0)).toBeNull();
+    expect(validateVocabularyTerm(entries, "ttm", 0)).toBeNull();
   });
 });
 

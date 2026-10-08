@@ -126,7 +126,7 @@ pub fn get_config_path() -> PathBuf {
             .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
         PathBuf::from(fallback)
     });
-    base.join("gladiaflow").join("config.json")
+    base.join("ttm").join("config.json")
 }
 
 fn with_config(f: impl FnOnce(&mut Config)) -> Result<(), String> {
@@ -526,7 +526,7 @@ mod tests {
                 .unwrap()
                 .as_nanos();
             let path = std::env::temp_dir().join(format!(
-                "gladiaflow-config-test-{}-{unique}",
+                "ttm-config-test-{}-{unique}",
                 std::process::id()
             ));
             fs::create_dir_all(&path).unwrap();

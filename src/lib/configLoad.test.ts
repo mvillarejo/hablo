@@ -14,7 +14,7 @@ describe("loadSavedApiKey", () => {
     expect(failure).toEqual({
       ok: false,
       message:
-        "GladiaFlow couldn't read your saved settings. Your API key has not been changed.",
+        "TTM couldn't read your saved settings. Your API key has not been changed.",
     });
   });
 
@@ -46,7 +46,7 @@ describe("loadSavedApiKey", () => {
     expect(result).toEqual({
       ok: false,
       message:
-        "GladiaFlow couldn't reset your settings. Your original settings file was not deleted.",
+        "TTM couldn't reset your settings. Your original settings file was not deleted.",
     });
   });
 });

@@ -8,7 +8,7 @@ export const DEFAULT_DICTATION_STATS: DictationStats = {
   totalSeconds: 0,
 };
 
-export const DICTATION_STATS_STORAGE_KEY = "gladiaflow.dictation.stats.v1";
+export const DICTATION_STATS_STORAGE_KEY = "ttm.dictation.stats.v1";
 
 export const getDictationComment = (totalSeconds: number): string => {
   const totalMinutes = totalSeconds / 60;

@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>GladiaFlow needs microphone access to capture your voice for real-time dictation.</string>
+	<string>TTM needs microphone access to capture your voice for real-time dictation.</string>
 </dict>
 </plist>
