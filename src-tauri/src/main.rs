@@ -12,6 +12,7 @@ use tokio::sync::Mutex as TokioMutex;
 use url::Url;
 
 mod audio;
+mod batch_stt;
 mod config;
 mod gladia;
 mod history;
@@ -19,6 +20,7 @@ mod hotkey;
 mod hotkey_layout;
 mod permissions;
 mod region;
+mod transcriber;
 mod utterance_cleaner;
 mod vocabulary;
 
@@ -27,6 +29,7 @@ use gladia::GladiaClient;
 use history::TranscriptionHistoryPage;
 use hotkey::HotkeyManager;
 use permissions::accessibility::AccessibilityState;
+use transcriber::{Provider, SessionParams, Transcriber, TranscriptionEvent};
 use vocabulary::CustomVocabEntry;
 
 #[derive(serde::Serialize, Clone)]
@@ -56,7 +59,7 @@ impl Default for RecordingState {
 }
 
 pub struct AppState {
-    pub gladia: Arc<TokioMutex<GladiaClient>>,
+    pub transcriber: Arc<TokioMutex<Transcriber>>,
     pub audio: Arc<AudioCapture>,
     pub audio_lifecycle: Arc<TokioMutex<()>>,
     pub hotkey_manager: Arc<TokioMutex<HotkeyManager>>,
@@ -209,14 +212,18 @@ async fn init_gladia_session(
         .await
         .map_err(|error| format!("Failed to join audio preparation task: {error}"))?
         .map_err(|error| error.to_string())?;
+    let stt = config::stt_settings()?;
+    let provider = Provider::from_config(&stt.provider);
     log::info!(
-        "initialising Gladia session (region={}, sample_rate={}, code_switching={})",
+        "initialising transcription session (provider={:?}, region={}, sample_rate={}, code_switching={})",
+        provider,
         state.region,
         sample_rate,
         code_switching.unwrap_or(false)
     );
-    let gladia = state.gladia.lock().await;
-    gladia.set_audio_format(sample_rate, 1, 16).await;
+    let mut transcriber = state.transcriber.lock().await;
+    transcriber.ensure_provider(provider).await;
+    transcriber.set_audio_format(sample_rate, 1, 16).await;
     let custom_vocabulary = custom_vocabulary
         .filter(|entries| !entries.is_empty())
         .or_else(|| config::get_custom_vocabulary().ok())
@@ -225,29 +232,32 @@ async fn init_gladia_session(
         Some(endpointing) => endpointing,
         None => config::endpointing()?,
     };
-    gladia
-        .init_session(
-            &api_key,
+    transcriber
+        .init_session(SessionParams {
+            api_key,
             languages,
-            code_switching.unwrap_or(false),
+            code_switching: code_switching.unwrap_or(false),
             custom_vocabulary,
             endpointing,
-            state.region,
-        )
+            region: state.region,
+            batch: stt.batch_settings(),
+        })
+        .await
+}
+
+#[tauri::command]
+async fn test_gladia_connection(api_key: String) -> Result<bool, String> {
+    GladiaClient::new()
+        .test_connection(&api_key)
         .await
         .map_err(|e| e.to_string())
 }
 
+/// Check an OpenAI-compatible endpoint is reachable and serves `settings.model`.
 #[tauri::command]
-async fn test_gladia_connection(
-    api_key: String,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
-    let gladia = state.gladia.lock().await;
-    gladia
-        .test_connection(&api_key)
-        .await
-        .map_err(|e| e.to_string())
+async fn test_stt_connection(settings: config::SttSettings) -> Result<String, String> {
+    let settings = config::validate_stt_settings(settings)?;
+    batch_stt::test_connection(&settings.batch_settings()).await
 }
 
 #[tauri::command]
@@ -325,17 +335,14 @@ mod external_url_tests {
 
 #[tauri::command]
 async fn send_audio_chunk(audio_data: Vec<u8>, state: State<'_, AppState>) -> Result<(), String> {
-    let gladia = state.gladia.lock().await;
-    gladia
-        .send_audio(&audio_data)
-        .await
-        .map_err(|e| e.to_string())
+    let transcriber = state.transcriber.lock().await;
+    transcriber.send_audio(&audio_data).await
 }
 
 #[tauri::command]
 async fn stop_recording(state: State<'_, AppState>) -> Result<(), String> {
-    let gladia = state.gladia.lock().await;
-    gladia.stop_recording().await.map_err(|e| e.to_string())
+    let transcriber = state.transcriber.lock().await;
+    transcriber.stop_recording().await
 }
 
 #[tauri::command]
@@ -391,9 +398,9 @@ async fn request_notification_permission() -> Result<bool, String> {
 
 #[tauri::command]
 async fn close_gladia_session(state: State<'_, AppState>) -> Result<(), String> {
-    log::info!("closing Gladia session");
-    let gladia = state.gladia.lock().await;
-    gladia.close_session().await.map_err(|e| e.to_string())
+    log::info!("closing transcription session");
+    let transcriber = state.transcriber.lock().await;
+    transcriber.close_session().await
 }
 
 #[tauri::command]
@@ -412,13 +419,13 @@ async fn subscribe_to_transcriptions(
     }
 
     let mut rx = {
-        let gladia = state.gladia.lock().await;
-        gladia.subscribe_to_transcriptions().await
+        let transcriber = state.transcriber.lock().await;
+        transcriber.subscribe_to_transcriptions().await
     };
 
     let session_id = {
-        let gladia = state.gladia.lock().await;
-        gladia.current_session_id().await
+        let transcriber = state.transcriber.lock().await;
+        transcriber.current_session_id().await
     };
 
     let active = state.subscription_active.clone();
@@ -470,11 +477,11 @@ async fn subscribe_to_transcriptions(
 
         while let Ok(event) = rx.recv().await {
             match event {
-                gladia::TranscriptionEvent::Error(message) => {
+                TranscriptionEvent::Error(message) => {
                     log::error!("[transcription] error: {message}");
                     let _ = app_handle.emit("transcription-error", message);
                 }
-                gladia::TranscriptionEvent::Partial(text) => {
+                TranscriptionEvent::Partial(text) => {
                     partial_count += 1;
                     if partial_count == 1 {
                         log::info!(
@@ -484,7 +491,7 @@ async fn subscribe_to_transcriptions(
                     }
                     let _ = app_handle.emit("transcription-partial", text);
                 }
-                gladia::TranscriptionEvent::Final { text, start, end } => {
+                TranscriptionEvent::Final { text, start, end } => {
                     final_count += 1;
                     let fragment = cleaner.process_final(&text, start, end);
                     log::info!(
@@ -499,7 +506,7 @@ async fn subscribe_to_transcriptions(
                     let _ = app_handle
                         .emit("transcription-final", cleaner.accumulated_text().to_owned());
                 }
-                gladia::TranscriptionEvent::SessionEnded => {
+                TranscriptionEvent::SessionEnded => {
                     let last_period = cleaner.flush_pending_period();
                     let full_text = cleaner.accumulated_text().to_owned();
                     final_transcript = Some(full_text.clone());
@@ -630,7 +637,7 @@ async fn start_audio_capture(
         }
     });
 
-    let gladia_arc = state.gladia.clone();
+    let transcriber_arc = state.transcriber.clone();
 
     // Bridge the blocking crossbeam channel into an async tokio channel so the
     // Tokio executor (which drives the WebSocket task) is never blocked.
@@ -667,16 +674,16 @@ async fn start_audio_capture(
             buf.extend_from_slice(&data);
             while buf.len() >= chunk_bytes {
                 let chunk: Vec<u8> = buf.drain(..chunk_bytes).collect();
-                let client = gladia_arc.lock().await;
+                let client = transcriber_arc.lock().await;
                 if let Err(e) = client.send_audio(&chunk).await {
-                    log::error!("failed to send audio chunk to Gladia: {e}");
+                    log::error!("failed to send audio chunk to transcriber: {e}");
                 }
             }
         }
 
         // Flush the partial tail so no audio is lost before stop_recording arrives.
         if !buf.is_empty() {
-            let client = gladia_arc.lock().await;
+            let client = transcriber_arc.lock().await;
             client.send_audio(&buf).await.ok();
         }
 
@@ -738,8 +745,8 @@ async fn stop_dictation(state: State<'_, AppState>) -> Result<(), String> {
     log::info!("stopping dictation; draining audio and finalising Gladia session");
     stop_and_drain_audio(&state).await?;
 
-    let gladia = state.gladia.lock().await;
-    gladia.stop_recording().await.map_err(|e| e.to_string())
+    let transcriber = state.transcriber.lock().await;
+    transcriber.stop_recording().await
 }
 
 #[tauri::command]
@@ -1155,7 +1162,9 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             app.manage(AppState {
-                gladia: Arc::new(TokioMutex::new(GladiaClient::new())),
+                transcriber: Arc::new(TokioMutex::new(Transcriber::for_provider(
+                    Provider::Gladia,
+                ))),
                 audio: Arc::new(AudioCapture::new()),
                 audio_lifecycle: Arc::new(TokioMutex::new(())),
                 hotkey_manager: Arc::new(TokioMutex::new(HotkeyManager::new())),
@@ -1288,6 +1297,7 @@ fn main() {
             config::reset_corrupted_config,
             init_gladia_session,
             test_gladia_connection,
+            test_stt_connection,
             list_transcription_history,
             open_external_url,
             send_audio_chunk,
@@ -1319,6 +1329,8 @@ fn main() {
             config::get_copy_to_clipboard,
             config::save_activation_mode,
             config::get_activation_mode,
+            config::save_stt_settings,
+            config::get_stt_settings,
             config::save_audio_device_selection,
             config::get_audio_device_selection,
             vocabulary::save_custom_vocabulary,

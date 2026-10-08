@@ -1,3 +1,4 @@
+use crate::transcriber::TranscriptionEvent;
 use crate::vocabulary::{expand_vocabulary_for_languages, normalize_vocabulary, CustomVocabEntry};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use futures_util::{SinkExt, StreamExt};
@@ -154,21 +155,6 @@ struct Utterance {
     #[serde(default)]
     #[allow(dead_code)]
     confidence: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub enum TranscriptionEvent {
-    Partial(String),
-    Final {
-        text: String,
-        start: f64,
-        end: f64,
-    },
-    /// The session ended abnormally (network drop, protocol error). Carries a
-    /// human-readable reason so the frontend can surface it. A normal,
-    /// server-initiated close emits `SessionEnded` only — never `Error`.
-    Error(String),
-    SessionEnded,
 }
 
 #[derive(Debug, thiserror::Error)]
