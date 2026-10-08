@@ -433,6 +433,54 @@ fn validate_external_url(url: &str) -> Result<Url, String> {
 }
 
 #[cfg(test)]
+mod profile_connection_tests {
+    use super::{test_profile, Profile, ProfileSettings};
+
+    fn ollama(id: &str, model: &str) -> Profile {
+        Profile {
+            id: id.to_string(),
+            name: id.to_string(),
+            settings: ProfileSettings::OpenAiCompat {
+                base_url: "http://localhost:11434/v1".to_string(),
+                model: model.to_string(),
+                api_key: String::new(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn gladia_profile_without_key_fails_before_any_request() {
+        let profile = Profile {
+            id: "g".to_string(),
+            name: "G".to_string(),
+            settings: ProfileSettings::Gladia {
+                api_key: "  ".to_string(),
+                region: "auto".to_string(),
+                endpointing: 0.1,
+                code_switching: false,
+            },
+        };
+        assert_eq!(
+            test_profile(&profile).await,
+            Err("Add a Gladia API key first".to_string())
+        );
+    }
+
+    /// Live check against a local Ollama serving `gemma4:e4b`:
+    /// `cargo test --manifest-path src-tauri/Cargo.toml -- --ignored live_ollama --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_ollama_profiles_test_connection() {
+        let ok = test_profile(&ollama("Local Ollama", "gemma4:e4b")).await;
+        println!("Local Ollama (gemma4:e4b) -> {ok:?}");
+        assert!(ok.is_ok());
+        let bogus = test_profile(&ollama("Ollama bogus", "no-such-model:1b")).await;
+        println!("Ollama bogus (no-such-model:1b) -> {bogus:?}");
+        assert!(bogus.is_err());
+    }
+}
+
+#[cfg(test)]
 mod external_url_tests {
     use super::validate_external_url;
 

@@ -1,14 +1,31 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import {
-  isBatchProvider,
-  validateSttBaseUrl,
+  DEFAULT_GLADIA_PROFILE_NAME,
+  DEFAULT_LOCAL_PROFILE_NAME,
+  defaultProfileSettings,
+  PROFILE_KIND_LABELS,
+  uniqueProfileName,
+  validateProfileDraft,
+  type NewProfile,
+  type Profile,
+  type ProfilesState,
   type SttProvider,
-  type SttSettings,
 } from "../lib/sttProvider";
 import type { AppSettings } from "../types";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { InfoTooltip } from "./InfoTooltip";
+import { ProfileEditor, type ConnectionTest } from "./ProfileEditor";
 import { SettingsPageLayout } from "./SettingsPageLayout";
+
+type EditorTarget = { mode: "create" } | { mode: "edit"; id: string };
+
+const IDLE_TEST: ConnectionTest = { state: "idle", message: "" };
+
+function toDraft(profile: Profile): NewProfile {
+  const { id: _id, ...draft } = profile;
+  return draft as NewProfile;
+}
 
 const LANGUAGE_PAGE_SIZE = 5;
 
@@ -24,8 +41,9 @@ export function TranscriptionSettingsView({
   setLanguageSearch,
   filteredLanguageOptions,
   selectedLanguageSummary,
-  sttSettings,
-  setSttSettings,
+  profilesState,
+  onProfilesChange,
+  isDictating,
   onDone,
 }: {
   settings: AppSettings;
@@ -39,35 +57,154 @@ export function TranscriptionSettingsView({
   setLanguageSearch: (v: string) => void;
   filteredLanguageOptions: readonly { code: string; label: string }[];
   selectedLanguageSummary: string;
-  sttSettings: SttSettings;
-  setSttSettings: (settings: SttSettings) => void;
+  profilesState: ProfilesState;
+  onProfilesChange: (state: ProfilesState) => void;
+  isDictating: boolean;
   onDone: () => void;
 }) {
-  const isBatch = isBatchProvider(sttSettings.provider);
-  const baseUrlError = validateSttBaseUrl(sttSettings.baseUrl);
-  const modelError = sttSettings.model.trim() ? null : "Model is required";
-  const [connectionTest, setConnectionTest] = useState<{
-    state: "idle" | "testing" | "ok" | "error";
-    message: string;
-  }>({ state: "idle", message: "" });
-  const updateStt = (patch: Partial<SttSettings>) => {
-    setConnectionTest({ state: "idle", message: "" });
-    setSttSettings({ ...sttSettings, ...patch });
+  const { profiles, active_profile_id: activeId } = profilesState;
+  const findProfile = (id: string) => profiles.find((p) => p.id === id);
+
+  const [editor, setEditor] = useState<EditorTarget | null>(null);
+  const [draft, setDraft] = useState<NewProfile | null>(null);
+  const radioGroupName = useId();
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [connectionTest, setConnectionTest] =
+    useState<ConnectionTest>(IDLE_TEST);
+  const [listError, setListError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const editingProfile =
+    editor?.mode === "edit" ? findProfile(editor.id) : undefined;
+  const draftErrors = draft
+    ? validateProfileDraft(
+        draft,
+        profiles,
+        editor?.mode === "edit" ? editor.id : null,
+      )
+    : {};
+  const isDirty =
+    !!draft &&
+    (!editingProfile ||
+      JSON.stringify(draft) !== JSON.stringify(toDraft(editingProfile)));
+
+  const closeEditor = () => {
+    setEditor(null);
+    setDraft(null);
+    setSaveError(null);
+    setConnectionTest(IDLE_TEST);
   };
-  const handleTestConnection = async () => {
+
+  const openEditor = (profile: Profile) => {
+    setEditor({ mode: "edit", id: profile.id });
+    setDraft(toDraft(profile));
+    setSaveError(null);
+    setConnectionTest(IDLE_TEST);
+  };
+
+  const defaultNameFor = (kind: SttProvider) =>
+    uniqueProfileName(
+      kind === "gladia"
+        ? DEFAULT_GLADIA_PROFILE_NAME
+        : DEFAULT_LOCAL_PROFILE_NAME,
+      profiles,
+    );
+
+  const startCreate = (kind: SttProvider) => {
+    setEditor({ mode: "create" });
+    setDraft({ name: defaultNameFor(kind), ...defaultProfileSettings(kind) });
+    setSaveError(null);
+    setConnectionTest(IDLE_TEST);
+  };
+
+  /** New profiles pick their kind first; keep a name the user typed. */
+  const changeDraftKind = (kind: SttProvider) => {
+    if (!draft || draft.kind === kind) return;
+    const name =
+      draft.name === defaultNameFor(draft.kind)
+        ? defaultNameFor(kind)
+        : draft.name;
+    setDraft({ name, ...defaultProfileSettings(kind) });
+    setSaveError(null);
+  };
+
+  const handleSave = async () => {
+    if (!draft || !editor) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      if (editor.mode === "create") {
+        const next = await invoke<ProfilesState>("create_profile", {
+          profile: draft,
+        });
+        onProfilesChange(next);
+        const created = next.profiles[next.profiles.length - 1];
+        setEditor({ mode: "edit", id: created.id });
+        setDraft(toDraft(created));
+      } else {
+        const next = await invoke<ProfilesState>("update_profile", {
+          profile: { ...draft, id: editor.id },
+        });
+        onProfilesChange(next);
+        const saved = next.profiles.find((p) => p.id === editor.id);
+        if (saved) setDraft(toDraft(saved));
+      }
+      setConnectionTest(IDLE_TEST);
+    } catch (error) {
+      setSaveError(String(error));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    if (editor?.mode !== "edit") return;
     setConnectionTest({ state: "testing", message: "" });
     try {
-      const message = await invoke<string>("test_stt_connection", {
-        settings: sttSettings,
+      const message = await invoke<string>("test_profile_connection", {
+        profileId: editor.id,
       });
       setConnectionTest({ state: "ok", message });
     } catch (error) {
       setConnectionTest({ state: "error", message: String(error) });
     }
   };
-  const endpointingValue = Number.isFinite(settings.endpointing)
-    ? settings.endpointing
-    : 0.1;
+
+  const handleSetActive = async (id: string) => {
+    if (id === activeId) return;
+    setListError(null);
+    try {
+      onProfilesChange(
+        await invoke<ProfilesState>("set_active_profile", { profileId: id }),
+      );
+    } catch (error) {
+      setListError(String(error));
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      onProfilesChange(
+        await invoke<ProfilesState>("delete_profile", {
+          profileId: deleteTarget.id,
+        }),
+      );
+      if (editor?.mode === "edit" && editor.id === deleteTarget.id) {
+        closeEditor();
+      }
+      setDeleteTarget(null);
+    } catch (error) {
+      setDeleteError(String(error));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
   const [languagePage, setLanguagePage] = useState(1);
   const totalLanguagePages = Math.max(
     1,
@@ -89,33 +226,127 @@ export function TranscriptionSettingsView({
   return (
     <SettingsPageLayout title="Transcription settings">
       <div className="form-group">
-        <label className="form-label" htmlFor="stt-provider">
-          Provider
-          <InfoTooltip label="About providers">
-            <strong>Provider</strong>
-            Gladia streams live and shows text while you speak. An
-            OpenAI-compatible endpoint (local Ollama by default) transcribes the
-            whole recording after you stop; with a local model the audio never
-            leaves this Mac.
+        <label className="form-label" id="profiles-label">
+          Profiles
+          <InfoTooltip label="About profiles">
+            <strong>Profiles</strong>
+            Each profile is a saved transcription setup. Gladia streams live and
+            shows text while you speak. An OpenAI-compatible endpoint (local
+            Ollama, Groq, OpenAI) transcribes the whole recording after you
+            stop; with a local model the audio never leaves this Mac. You can
+            also switch profiles from the menu bar icon.
           </InfoTooltip>
         </label>
-        <select
-          id="stt-provider"
-          className="form-input"
-          value={sttSettings.provider}
-          onChange={(e) =>
-            updateStt({ provider: e.target.value as SttProvider })
-          }
+        <div
+          className="profile-list"
+          role="radiogroup"
+          aria-labelledby="profiles-label"
         >
-          <option value="gladia">Gladia (live streaming)</option>
-          <option value="openai_compat">
-            OpenAI-compatible (e.g. local Ollama)
-          </option>
-        </select>
+          {profiles.map((profile) => {
+            const isActive = profile.id === activeId;
+            const deleteBlocked = isActive || profiles.length <= 1;
+            return (
+              <div
+                key={profile.id}
+                className={`profile-row${isActive ? " profile-row--active" : ""}${
+                  editor?.mode === "edit" && editor.id === profile.id
+                    ? " profile-row--editing"
+                    : ""
+                }`}
+              >
+                <label className="profile-row-main">
+                  <input
+                    type="radio"
+                    name={radioGroupName}
+                    className="profile-radio"
+                    checked={isActive}
+                    onChange={() => void handleSetActive(profile.id)}
+                  />
+                  <span className="profile-row-name">{profile.name}</span>
+                  <span className="profile-kind-badge">
+                    {PROFILE_KIND_LABELS[profile.kind]}
+                  </span>
+                  {isActive && (
+                    <span className="profile-kind-badge profile-kind-badge--active">
+                      Active
+                    </span>
+                  )}
+                </label>
+                <div className="profile-row-actions">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    aria-label={`Edit profile ${profile.name}`}
+                    onClick={() => openEditor(profile)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    aria-label={`Delete profile ${profile.name}`}
+                    disabled={deleteBlocked}
+                    title={
+                      profiles.length <= 1
+                        ? "You need at least one profile"
+                        : isActive
+                          ? "Switch to another profile before deleting this one"
+                          : undefined
+                    }
+                    onClick={() => {
+                      setDeleteError(null);
+                      setDeleteTarget(profile);
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {listError && (
+          <p className="form-footnote form-footnote--danger" role="alert">
+            {listError}
+          </p>
+        )}
+        {isDictating && (
+          <p className="form-footnote text-secondary">
+            Profile changes apply from your next dictation.
+          </p>
+        )}
       </div>
-      <div className={isBatch ? undefined : "settings-row"}>
+
+      {editor && draft && (
+        <ProfileEditor
+          draft={draft}
+          onChange={(next) => {
+            setDraft(next);
+            setSaveError(null);
+            setConnectionTest(IDLE_TEST);
+          }}
+          errors={draftErrors}
+          isNew={editor.mode === "create"}
+          isDirty={isDirty}
+          isSaving={isSaving}
+          saveError={saveError}
+          connectionTest={connectionTest}
+          onSave={() => void handleSave()}
+          onCancel={closeEditor}
+          onTest={() => void handleTest()}
+          onKindChange={editor.mode === "create" ? changeDraftKind : undefined}
+        />
+      )}
+
+      <div>
         <div className="form-group">
-          <label className="form-label">Languages</label>
+          <label className="form-label">
+            Languages
+            <InfoTooltip label="About languages">
+              <strong>Languages</strong>
+              Shared by every profile, like your custom vocabulary.
+            </InfoTooltip>
+          </label>
           <div
             className={`multi-select ${languageDropdownOpen ? "open" : ""}`}
             ref={languageDropdownRef}
@@ -205,164 +436,38 @@ export function TranscriptionSettingsView({
             )}
           </div>
         </div>
-        {!isBatch && (
-          <div className="form-group">
-            <label className="form-label">Code switching</label>
-            <label className="toggle-switch" title="Code switching">
-              <input
-                type="checkbox"
-                checked={settings.codeSwitching}
-                onChange={(e) =>
-                  setSettings({
-                    ...settings,
-                    codeSwitching: e.target.checked,
-                  })
-                }
-              />
-              <span className="toggle-slider" />
-            </label>
-          </div>
-        )}
       </div>
 
-      {isBatch ? (
-        <>
-          <div className="form-group">
-            <label className="form-label" htmlFor="stt-base-url">
-              Base URL
-            </label>
-            <input
-              id="stt-base-url"
-              type="text"
-              className={`form-input${baseUrlError ? " form-input--error" : ""}`}
-              value={sttSettings.baseUrl}
-              placeholder="http://localhost:11434/v1"
-              onChange={(e) => updateStt({ baseUrl: e.target.value })}
-              autoCorrect="off"
-              autoCapitalize="none"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {baseUrlError && (
-              <p className="form-footnote form-footnote--danger">
-                {baseUrlError}
-              </p>
-            )}
-          </div>
-          <div className="settings-row">
-            <div className="form-group">
-              <label className="form-label" htmlFor="stt-model">
-                Model
-              </label>
-              <input
-                id="stt-model"
-                type="text"
-                className={`form-input${modelError ? " form-input--error" : ""}`}
-                value={sttSettings.model}
-                placeholder="gemma4:e4b"
-                onChange={(e) => updateStt({ model: e.target.value })}
-                autoCorrect="off"
-                autoCapitalize="none"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              {modelError && (
-                <p className="form-footnote form-footnote--danger">
-                  {modelError}
-                </p>
-              )}
-            </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="stt-api-key">
-                API key
-              </label>
-              <input
-                id="stt-api-key"
-                type="password"
-                className="api-key-input"
-                value={sttSettings.apiKey}
-                placeholder="Optional, not needed for Ollama"
-                onChange={(e) => updateStt({ apiKey: e.target.value })}
-                autoCorrect="off"
-                autoCapitalize="none"
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-          </div>
-          {connectionTest.message && (
-            <p
-              className={`form-footnote ${
-                connectionTest.state === "error"
-                  ? "form-footnote--danger"
-                  : "text-secondary"
-              }`}
-              role="status"
-            >
-              {connectionTest.message}
-            </p>
-          )}
-        </>
-      ) : (
-        <div className="form-group">
-          <label className="form-label">
-            Endpointing
-            <InfoTooltip label="About endpointing">
-              <strong>Endpointing</strong>
-              How long (in seconds) Gladia waits for silence before treating an
-              utterance as finished. Lower values feel snappier but may cut
-              sentences short; higher values wait longer so pauses don&apos;t
-              split your speech.
-            </InfoTooltip>
-          </label>
-          <div className="endpointing-control">
-            <input
-              type="range"
-              className="endpointing-slider"
-              min={0.05}
-              max={1}
-              step={0.05}
-              value={endpointingValue}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  endpointing: parseFloat(e.target.value),
-                })
-              }
-            />
-            <span className="endpointing-value">
-              {endpointingValue.toFixed(2)}s
-            </span>
-          </div>
-        </div>
-      )}
-
       <div className="setup-nav setup-nav-center">
-        {isBatch && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={handleTestConnection}
-            disabled={
-              connectionTest.state === "testing" ||
-              !!baseUrlError ||
-              !!modelError
-            }
-          >
-            {connectionTest.state === "testing" ? (
-              <>
-                <span className="btn-spinner" aria-hidden="true" />
-                Testing...
-              </>
-            ) : (
-              "Test connection"
-            )}
-          </button>
-        )}
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => startCreate("openai_compat")}
+        >
+          Add profile
+        </button>
         <button className="btn btn-primary" onClick={onDone}>
           Done
         </button>
       </div>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={`Delete "${deleteTarget?.name ?? ""}"?`}
+        confirmLabel="Delete profile"
+        busyLabel="Deleting..."
+        isBusy={isDeleting}
+        error={deleteError}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => void handleDelete()}
+      >
+        <p>
+          This removes the profile and any API key saved in it. Your languages
+          and vocabulary are not affected.
+        </p>
+      </ConfirmDialog>
     </SettingsPageLayout>
   );
 }

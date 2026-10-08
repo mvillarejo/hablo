@@ -1966,6 +1966,136 @@ select.form-input {
   margin-top: var(--space-5);
 }
 
+/* Transcription profiles */
+.profile-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 2px var(--space-1) 2px var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  background: var(--bg-tertiary);
+  transition:
+    background var(--duration-160) var(--ease-out),
+    border-color var(--duration-160) var(--ease-out);
+}
+
+.profile-row:hover {
+  background: var(--bg-elevated);
+}
+
+.profile-row--active {
+  border-color: var(--border-card);
+}
+
+.profile-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.profile-radio {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--text-brand);
+  cursor: pointer;
+}
+
+.profile-radio:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.profile-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-14);
+  color: var(--text-primary);
+}
+
+.profile-kind-badge {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-10);
+  white-space: nowrap;
+}
+
+.profile-kind-badge--active {
+  color: var(--status-success);
+  background: color-mix(in srgb, var(--status-success) 12%, transparent);
+}
+
+.profile-row-actions {
+  flex: none;
+  display: flex;
+  gap: var(--space-1);
+}
+
+.profile-row-actions .btn-sm {
+  padding: var(--space-1) var(--space-3);
+}
+
+.profile-editor-dialog {
+  height: fit-content;
+  max-height: calc(100vh - 24px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.profile-editor-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  text-align: left;
+}
+
+.profile-editor-body .form-label {
+  justify-content: flex-start;
+}
+
+.profile-editor-body .form-input,
+.profile-editor-body .api-key-input {
+  text-align: left;
+}
+
+.profile-editor-body .toggle-switch {
+  align-self: flex-start;
+}
+
+.profile-kind-picker {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.profile-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.profile-editor-spacer {
+  flex: 1;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

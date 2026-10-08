@@ -47,15 +47,20 @@ import {
   SHORT_EMPTY_DICTATION_LIMIT,
   updateHoldModeWarningStreak,
 } from "./lib/holdModeWarning";
-import { loadSavedApiKey, resetCorruptedConfig } from "./lib/configLoad";
+import { loadSavedProfiles, resetCorruptedConfig } from "./lib/configLoad";
 import { resolveHotkeyPress } from "./lib/dictationHotkey";
 import {
   canDictate,
-  DEFAULT_STT_SETTINGS,
+  DEFAULT_LOCAL_PROFILE_NAME,
+  defaultProfileSettings,
+  EMPTY_PROFILES_STATE,
+  getActiveProfile,
   isBatchProvider,
   sessionEndFallbackMs,
-  validateSttBaseUrl,
-  type SttSettings,
+  uniqueProfileName,
+  type Profile,
+  type ProfilesState,
+  type SttProvider,
 } from "./lib/sttProvider";
 import { SidebarNav, type NavScreen } from "./components/SidebarNav";
 import { AppSettingsView } from "./components/AppSettingsView";
@@ -140,10 +145,9 @@ export default function App() {
     detail: "",
   });
   const [apiKey, setApiKey] = useState<string>("");
-  const [sttSettings, setSttSettings] =
-    useState<SttSettings>(DEFAULT_STT_SETTINGS);
+  const [profilesState, setProfilesState] =
+    useState<ProfilesState>(EMPTY_PROFILES_STATE);
   const [isApiKeyLocked, setIsApiKeyLocked] = useState(false);
-  const [hasSavedApiKey, setHasSavedApiKey] = useState(false);
   const [isTestingApiKey, setIsTestingApiKey] = useState(false);
   const [configLoadPending, setConfigLoadPending] = useState(true);
   const [configLoadError, setConfigLoadError] = useState<string | null>(null);
@@ -162,9 +166,7 @@ export default function App() {
     audioDevice: "",
     audioDeviceSelection: { mode: "automatic" },
     hotkey: "Fn",
-    codeSwitching: false,
     copyToClipboard: false,
-    endpointing: 0.1,
     customVocabulary: DEFAULT_CUSTOM_VOCABULARY,
   });
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
@@ -210,11 +212,9 @@ export default function App() {
   const justCapturedRef = useRef(false);
   const languageSettingsLoaded = useRef(false);
   const vocabularySettingsLoaded = useRef(false);
-  const endpointingLoaded = useRef(false);
   const copyToClipboardLoaded = useRef(false);
   const activationModeLoaded = useRef(false);
   const audioDeviceSelectionLoaded = useRef(false);
-  const sttSettingsLoaded = useRef(false);
 
   const isRecordingRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -228,11 +228,16 @@ export default function App() {
   const permissionsRef = useRef(permissions);
   const checkAllPermissionsRef = useRef<() => void>(() => {});
   const permissionCheckInFlightRef = useRef<Promise<void> | null>(null);
-  const apiKeyRef = useRef(apiKey);
-  const sttSettingsRef = useRef(sttSettings);
+  const profilesStateRef = useRef(profilesState);
+  /** Kind and settings of the profile the open session was started with, so a
+   * profile switch mid-dictation only applies to the next session. */
+  const sessionKindRef = useRef<SttProvider | null>(null);
+  const sessionProfileKeyRef = useRef<string | null>(null);
   /** Gladia needs a saved key; an OpenAI-compatible endpoint does not. */
   const canDictateNow = () =>
-    canDictate(sttSettingsRef.current.provider, apiKeyRef.current);
+    canDictate(getActiveProfile(profilesStateRef.current));
+  const activeProfileKey = (state: ProfilesState) =>
+    JSON.stringify(getActiveProfile(state));
   const refreshTranscriptionHistoryRef = useRef<() => Promise<void>>(
     async () => {},
   );
@@ -283,13 +288,12 @@ export default function App() {
     if (!languageSettingsLoaded.current) return;
     invoke("save_language_settings", {
       languages: settings.languages,
-      codeSwitching: settings.codeSwitching,
     }).catch(console.error);
     if (sessionInitialized.current && !isRecordingRef.current) {
       sessionInitialized.current = false;
       invoke("close_gladia_session").catch(console.error);
     }
-  }, [settings.languages, settings.codeSwitching]);
+  }, [settings.languages]);
   useEffect(() => {
     if (!vocabularySettingsLoaded.current) return;
     invoke("save_custom_vocabulary", {
@@ -300,16 +304,6 @@ export default function App() {
       invoke("close_gladia_session").catch(console.error);
     }
   }, [settings.customVocabulary]);
-  useEffect(() => {
-    if (!endpointingLoaded.current) return;
-    invoke("save_endpointing", { endpointing: settings.endpointing }).catch(
-      console.error,
-    );
-    if (sessionInitialized.current && !isRecordingRef.current) {
-      sessionInitialized.current = false;
-      invoke("close_gladia_session").catch(console.error);
-    }
-  }, [settings.endpointing]);
   useEffect(() => {
     if (!copyToClipboardLoaded.current) return;
     invoke("save_copy_to_clipboard", {
@@ -328,25 +322,17 @@ export default function App() {
       selection: settings.audioDeviceSelection,
     }).catch(console.error);
   }, [settings.audioDeviceSelection]);
+  const currentActiveProfileKey = activeProfileKey(profilesState);
   useEffect(() => {
-    sttSettingsRef.current = sttSettings;
-    if (!sttSettingsLoaded.current) return;
-    // Only persist values the backend will accept; the form shows the error.
-    if (validateSttBaseUrl(sttSettings.baseUrl) || !sttSettings.model.trim()) {
-      return;
-    }
-    invoke("save_stt_settings", { settings: sttSettings }).catch(console.error);
+    // A new active profile (or an edit to it) applies to the next session.
     if (sessionInitialized.current && !isRecordingRef.current) {
       sessionInitialized.current = false;
       invoke("close_gladia_session").catch(console.error);
     }
-  }, [sttSettings]);
+  }, [currentActiveProfileKey]);
   useEffect(() => {
     permissionsRef.current = permissions;
   }, [permissions]);
-  useEffect(() => {
-    apiKeyRef.current = apiKey;
-  }, [apiKey]);
 
   const clearStopFallbackTimer = () => {
     if (stopFallbackTimerRef.current !== null) {
@@ -474,12 +460,23 @@ export default function App() {
   const pressedKeysRef = useRef(new Set<string>());
   const recordedHotkeyRef = useRef<string>("");
 
+  /** Apply a saved profiles snapshot; the key field mirrors the active
+   * Gladia profile's saved key. */
+  const applyProfilesState = useCallback((state: ProfilesState) => {
+    profilesStateRef.current = state;
+    setProfilesState(state);
+    const active = getActiveProfile(state);
+    const savedKey = active?.kind === "gladia" ? active.api_key : "";
+    setApiKey(savedKey);
+    setIsApiKeyLocked(savedKey.length > 0);
+  }, []);
+
   const loadApiKeyFromConfig = useCallback(async () => {
     setConfigLoadPending(true);
-    const result = await loadSavedApiKey();
+    const result = await loadSavedProfiles();
     if (!result.ok) {
       await logError(
-        "[config] API key load failed; showing configuration recovery screen",
+        "[config] profiles load failed; showing configuration recovery screen",
       ).catch(() => {});
       setConfigLoadError(result.message);
       setConfigLoadPending(false);
@@ -487,17 +484,9 @@ export default function App() {
     }
 
     setConfigLoadError(null);
-    if (result.apiKey) {
-      setApiKey(result.apiKey);
-      setIsApiKeyLocked(true);
-      setHasSavedApiKey(true);
-    } else {
-      setApiKey("");
-      setIsApiKeyLocked(false);
-      setHasSavedApiKey(false);
-    }
+    applyProfilesState(result.profiles);
     setConfigLoadPending(false);
-  }, []);
+  }, [applyProfilesState]);
 
   const handleResetCorruptedConfig = useCallback(async () => {
     setIsResettingConfig(true);
@@ -531,15 +520,8 @@ export default function App() {
       const v = await getVersion().catch(() => "");
       setAppVersion(v);
 
-      // Load the provider before the API key so the onboarding gate never
-      // flashes for users on a keyless (local) provider.
-      const savedSttSettings = await invoke<SttSettings>(
-        "get_stt_settings",
-      ).catch(() => DEFAULT_STT_SETTINGS);
-      sttSettingsRef.current = savedSttSettings;
-      setSttSettings(savedSttSettings);
-      sttSettingsLoaded.current = true;
-
+      // Profiles carry the provider and key, so the onboarding gate never
+      // flashes for users on a keyless (local) profile.
       await loadApiKeyFromConfig();
 
       const savedHotkey = await invoke<string | null>("get_hotkey").catch(
@@ -550,17 +532,13 @@ export default function App() {
         await invoke("save_hotkey", { hotkey }).catch(console.error);
       }
 
-      const [savedLanguages, savedCodeSwitching] = await invoke<
-        [string[] | null, boolean | null]
-      >("get_language_settings").catch(() => [null, null] as [null, null]);
+      const savedLanguages = await invoke<string[] | null>(
+        "get_language_settings",
+      ).catch(() => null);
 
       const savedVocabulary = await invoke<CustomVocabEntry[]>(
         "get_custom_vocabulary",
       ).catch(() => [] as CustomVocabEntry[]);
-
-      const savedEndpointing = await invoke<number>("get_endpointing").catch(
-        () => 0.1,
-      );
 
       const savedCopyToClipboard = await invoke<boolean>(
         "get_copy_to_clipboard",
@@ -580,10 +558,6 @@ export default function App() {
         ...(savedLanguages && savedLanguages.length > 0
           ? { languages: savedLanguages }
           : {}),
-        ...(savedCodeSwitching !== null
-          ? { codeSwitching: savedCodeSwitching }
-          : {}),
-        endpointing: savedEndpointing,
         copyToClipboard: savedCopyToClipboard,
         activationMode: savedActivationMode,
         audioDeviceSelection: savedAudioDeviceSelection,
@@ -591,7 +565,6 @@ export default function App() {
       }));
       languageSettingsLoaded.current = true;
       vocabularySettingsLoaded.current = true;
-      endpointingLoaded.current = true;
       copyToClipboardLoaded.current = true;
       activationModeLoaded.current = true;
       audioDeviceSelectionLoaded.current = true;
@@ -610,9 +583,7 @@ export default function App() {
           audioDevice: "",
           audioDeviceSelection: { mode: "automatic" },
           hotkey: settings.hotkey,
-          codeSwitching: settings.codeSwitching,
           copyToClipboard: settings.copyToClipboard,
-          endpointing: settings.endpointing,
           customVocabulary: settings.customVocabulary,
         },
         apiKeySet: !!apiKey,
@@ -644,6 +615,12 @@ export default function App() {
       const unlistenHotkeyReleased = await listen("hotkey-released", () => {
         handleHotkeyReleased().catch(console.error);
       });
+
+      // Profile changes made from the tray (or anywhere else) show up here.
+      const unlistenProfilesChanged = await listen<ProfilesState>(
+        "profiles-changed",
+        (event) => applyProfilesState(event.payload),
+      );
 
       const unlistenAudioReady = await listen<{
         captureId: string;
@@ -704,14 +681,20 @@ export default function App() {
               try {
                 sessionInitialized.current = false;
                 await invoke("close_gladia_session").catch(console.error);
+                // Never reconnect a live dictation onto a different profile.
+                if (
+                  sessionProfileKeyRef.current !==
+                  activeProfileKey(profilesStateRef.current)
+                ) {
+                  throw new Error(
+                    "transcription profile changed mid-dictation",
+                  );
+                }
                 await invoke("init_gladia_session", {
-                  apiKey: apiKeyRef.current.trim(),
                   languages: settingsRef.current.languages,
                   deviceName: null,
                   deviceSelection: settingsRef.current.audioDeviceSelection,
-                  codeSwitching: settingsRef.current.codeSwitching,
                   customVocabulary: settingsRef.current.customVocabulary,
-                  endpointing: settingsRef.current.endpointing,
                 });
                 await invoke("subscribe_to_transcriptions");
                 sessionInitialized.current = true;
@@ -854,6 +837,7 @@ export default function App() {
       if (cancelled) {
         unlistenHotkeyPressed();
         unlistenHotkeyReleased();
+        unlistenProfilesChanged();
         unlistenAudioReady();
         unlistenPartial();
         unlistenFinal();
@@ -866,6 +850,7 @@ export default function App() {
       cleanups = [
         unlistenHotkeyPressed,
         unlistenHotkeyReleased,
+        unlistenProfilesChanged,
         unlistenAudioReady,
         unlistenPartial,
         unlistenFinal,
@@ -1269,10 +1254,11 @@ export default function App() {
         return;
       }
 
-      await invoke("save_api_key", { apiKey: trimmedApiKey });
-      setApiKey(trimmedApiKey);
-      setIsApiKeyLocked(true);
-      setHasSavedApiKey(true);
+      applyProfilesState(
+        await invoke<ProfilesState>("save_gladia_key", {
+          apiKey: trimmedApiKey,
+        }),
+      );
       setStatus({
         phase: "idle",
         title: "Ready",
@@ -1289,6 +1275,30 @@ export default function App() {
     } finally {
       setIsTestingApiKey(false);
     }
+  };
+
+  /** Onboarding: activate an OpenAI-compatible profile, creating the default
+   * local Ollama one when none exists. */
+  const handleUseLocalModel = async () => {
+    const current = profilesStateRef.current;
+    let local: Profile | undefined = current.profiles.find(
+      (p) => p.kind === "openai_compat",
+    );
+    if (!local) {
+      const created = await invoke<ProfilesState>("create_profile", {
+        profile: {
+          name: uniqueProfileName(DEFAULT_LOCAL_PROFILE_NAME, current.profiles),
+          ...defaultProfileSettings("openai_compat"),
+        },
+      });
+      local = created.profiles[created.profiles.length - 1];
+    }
+    applyProfilesState(
+      await invoke<ProfilesState>("set_active_profile", {
+        profileId: local.id,
+      }),
+    );
+    setNavScreen("dictation");
   };
 
   const handleLanguageToggle = (code: string, checked: boolean) => {
@@ -1320,8 +1330,12 @@ export default function App() {
   };
 
   // Batch providers have no partials: the text only arrives after stop.
+  const sessionKind = (): SttProvider =>
+    sessionKindRef.current ??
+    getActiveProfile(profilesStateRef.current)?.kind ??
+    "gladia";
   const finalizingDetail = () =>
-    isBatchProvider(sttSettingsRef.current.provider)
+    isBatchProvider(sessionKind())
       ? "Transcribing your recording..."
       : "Pasting your transcription";
 
@@ -1353,14 +1367,13 @@ export default function App() {
           });
         }
       },
-      sessionEndFallbackMs(sttSettingsRef.current.provider, recordingSeconds),
+      sessionEndFallbackMs(sessionKind(), recordingSeconds),
     );
   };
 
   const handleStartDictation = async () => {
     const keyDownAt = performance.now();
     const captureId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const currentApiKey = apiKeyRef.current;
     if (!canDictateNow()) return;
     if (isProcessingRef.current) return;
 
@@ -1427,14 +1440,16 @@ export default function App() {
       ).catch(() => {});
 
       if (!sessionInitialized.current) {
+        const sessionProfile = getActiveProfile(profilesStateRef.current);
+        sessionKindRef.current = sessionProfile?.kind ?? null;
+        sessionProfileKeyRef.current = activeProfileKey(
+          profilesStateRef.current,
+        );
         await invoke("init_gladia_session", {
-          apiKey: currentApiKey,
           languages: settingsRef.current.languages,
           deviceName: null,
           deviceSelection: settingsRef.current.audioDeviceSelection,
-          codeSwitching: settingsRef.current.codeSwitching,
           customVocabulary: settingsRef.current.customVocabulary,
-          endpointing: settingsRef.current.endpointing,
         });
         if (activeCaptureIdRef.current !== captureId) {
           await invoke("close_gladia_session").catch(console.error);
@@ -1819,11 +1834,13 @@ export default function App() {
         ? funnyHomeMessage
         : defaultIdlePrompt;
 
-  const isBatch = isBatchProvider(sttSettings.provider);
+  const activeProfile = getActiveProfile(profilesState);
+  const isBatch = activeProfile ? isBatchProvider(activeProfile.kind) : false;
+  const activeProfileReady = canDictate(activeProfile);
   const activeScreen = resolveScreen(
     navScreen,
     permissions,
-    hasSavedApiKey || isBatch,
+    activeProfileReady,
   );
   const isGateScreen =
     activeScreen === "permissions" || activeScreen === "api-onboarding";
@@ -1896,8 +1913,9 @@ export default function App() {
               setLanguageSearch={setLanguageSearch}
               filteredLanguageOptions={filteredLanguageOptions}
               selectedLanguageSummary={selectedLanguageSummary}
-              sttSettings={sttSettings}
-              setSttSettings={setSttSettings}
+              profilesState={profilesState}
+              onProfilesChange={applyProfilesState}
+              isDictating={isRecording || isProcessing}
               onDone={() => setNavScreen("home")}
             />
           )}
@@ -1966,11 +1984,14 @@ export default function App() {
               onChangeKey={setApiKey}
               onSave={handleSaveApiKey}
               onUseLocalModel={() => {
-                setSttSettings((prev) => ({
-                  ...prev,
-                  provider: "openai_compat",
-                }));
-                setNavScreen("dictation");
+                handleUseLocalModel().catch((error) => {
+                  console.error("Failed to switch to a local model:", error);
+                  setStatus({
+                    phase: "error",
+                    title: "Error",
+                    detail: `Could not switch to a local model: ${error}`,
+                  });
+                });
               }}
             />
           )}
@@ -1985,7 +2006,7 @@ export default function App() {
               funnyDictationComment={funnyDictationComment}
               apiKeyDisplayValue={apiKeyDisplayValue}
               isApiKeyLocked={isApiKeyLocked}
-              hasSavedApiKey={hasSavedApiKey || isBatch}
+              hasSavedApiKey={activeProfileReady}
               showApiKeyField={!isBatch}
               isTestingApiKey={isTestingApiKey}
               onChangeApiKey={setApiKey}

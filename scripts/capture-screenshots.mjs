@@ -23,6 +23,8 @@ const SCREENS = screensArg
       "06c-vocabulary-new",
       "07-transcription-settings",
       "07b-transcription-settings-local",
+      "07c-profile-editor-gladia",
+      "07d-profile-delete-confirm",
       "08-app-settings",
       "09-language-picker",
     ];
@@ -98,6 +100,28 @@ async function main() {
       await page.locator(".vocab-editor-dialog").waitFor({ state: "visible" });
       await page.waitForTimeout(100);
     }
+    const profileAction = {
+      "07b-transcription-settings-local": [
+        "Edit profile Local Ollama",
+        ".profile-editor-dialog",
+      ],
+      "07c-profile-editor-gladia": [
+        "Edit profile Gladia",
+        ".profile-editor-dialog",
+      ],
+      "07d-profile-delete-confirm": [
+        "Delete profile Groq",
+        ".config-reset-dialog",
+      ],
+    }[id];
+    if (profileAction) {
+      await page
+        .locator(selector)
+        .getByRole("button", { name: profileAction[0], exact: true })
+        .click();
+      await page.locator(profileAction[1]).waitFor({ state: "visible" });
+      await page.waitForTimeout(100);
+    }
     if (returnFocusName) {
       if (
         (await page
@@ -155,6 +179,7 @@ async function main() {
         ".vocab-summary-list",
         ".vocab-editor-dialog",
         ".multi-select-options",
+        ".profile-list",
       ];
       return selectors.flatMap((targetSelector) =>
         [...root.querySelectorAll(targetSelector)]
@@ -178,6 +203,21 @@ async function main() {
     const outPath = path.join(OUTPUT_DIR, `${id}.png`);
     await page.locator(selector).screenshot({ path: outPath });
     console.log(`Saved ${outPath}`);
+    if (profileAction) {
+      // Dialogs live in the top layer, outside the screen root.
+      const dialogOverflow = await page
+        .locator(`${profileAction[1]}, .profile-editor-body`)
+        .evaluateAll((elements) =>
+          elements.some(
+            (element) =>
+              element.scrollHeight > element.clientHeight + 1 ||
+              element.scrollWidth > element.clientWidth + 1,
+          ),
+        );
+      if (dialogOverflow) throw new Error(`${id} dialog content overflows`);
+      await page.keyboard.press("Escape");
+      await page.locator(profileAction[1]).waitFor({ state: "detached" });
+    }
     if (returnFocusName) {
       if (id === "06b-vocabulary-editor") {
         const pronunciationInput = page.locator(
@@ -215,7 +255,7 @@ async function main() {
           .locator(".vocab-editor-dialog")
           .waitFor({ state: "visible" });
         await page.getByRole("button", { name: "Delete term" }).click();
-        await page.getByRole("button", { name: "Delete" }).click();
+        await page.getByRole("button", { name: "Delete", exact: true }).click();
         await page
           .locator(".vocab-editor-dialog")
           .waitFor({ state: "detached" });
