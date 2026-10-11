@@ -66,11 +66,25 @@ TTM can transcribe with a local model through Ollama's OpenAI-compatible API ins
 2. A new install starts with an active **Local Ollama** profile. If you already used Gladia, open **Transcription settings** and select **Local Ollama**, or add an **OpenAI-compatible** profile. The onboarding screen also has **Use a local model (Ollama) instead**.
 3. Keep the defaults (base URL `http://localhost:11434/v1`, model `gemma4:e4b`, no API key), click **Edit** on the profile and then **Test connection**.
 
-There is no streaming with this provider. Nothing shows while you speak: TTM transcribes the whole recording after you release the shortcut, and sends recordings longer than 28 seconds as consecutive chunks. In testing, a 3-second clip came back in about 1 second and a 46-second clip in about 27 seconds.
+There is no streaming with this provider, so no text shows while you speak. TTM still transcribes in the background as you go (see [Incremental transcription](#incremental-transcription)). In testing, a 3-second clip came back in about 1 second, and a 41-second clip was pasted 4.9 seconds after release (`gemma4:e2b` on a 16 GB M2).
 
 Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint, such as Groq or OpenAI, work the same way: add an OpenAI-compatible profile with that service's base URL, API key and model. In that case the audio goes to that service.
 
 You can keep several profiles, for example two Ollama servers with different models, or a work and a personal Gladia account. One profile is active at a time. Switch it in **Transcription settings** or from the **Provider** submenu of the menu bar icon. A switch during a dictation takes effect on the next one. Languages and custom vocabulary are shared by all profiles.
+
+## Floating indicator
+
+While you dictate, a small pill appears at the bottom centre of the screen your pointer is on, just above the Dock. Its bars follow your microphone level while TTM listens, pulsing dots show while the text is transcribed, and a brief red tint appears if the dictation fails. It hides once the text is pasted or the dictation is cancelled.
+
+The pill never takes focus or brings TTM to the front, so the paste still lands in the app you were typing in. Clicks go through it to the window underneath. It is on by default; to turn it off, open **App settings** and switch off **Show floating indicator**.
+
+## Incremental transcription
+
+With an OpenAI-compatible profile (local Ollama by default), TTM transcribes while you speak. Once about 10 seconds of audio have built up, it cuts at the next natural pause and sends that chunk in the background while you keep talking. If you don't pause within 20 seconds, it cuts at the quietest moment of the last two seconds. Chunks go out one at a time, so a laptop running the model locally never runs two transcriptions in parallel. When you release the key, only the last few seconds are left to send. TTM joins the chunk texts in order and pastes them once, as before.
+
+If you press Esc, cancel, or hit an error, TTM discards every pending chunk and any late result. A partial transcript is never pasted.
+
+For a local Ollama server (a localhost address or port 11434), TTM also asks Ollama to load the model as soon as you press the key, so it is ready when the first chunk arrives. That request goes out at most every 30 seconds and is never sent to cloud providers, which bill per request.
 
 ## Using a Logitech mouse button
 
@@ -138,7 +152,7 @@ Global hotkey → microphone capture ─┬→ Gladia WebSocket (live)
 Focused app ← clipboard-safe paste ← transcript cleanup
 ```
 
-1. The global hotkey starts microphone capture and opens a Gladia live session. The OpenAI-compatible provider instead buffers the audio and transcribes it after you release the hotkey.
+1. The global hotkey starts microphone capture and opens a Gladia live session. The OpenAI-compatible provider instead cuts the audio at pauses and transcribes each chunk in the background, one request at a time (see [Incremental transcription](#incremental-transcription)).
 2. With Gladia, PCM audio is sent in chunks while partial and final transcription events stream back.
 3. Final utterances pass through `UtteranceCleaner`, which handles punctuation, capitalization, and duplicates.
 4. Clean incremental text is pasted into the focused app without permanently replacing the clipboard.
