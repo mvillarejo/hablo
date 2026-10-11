@@ -30,6 +30,11 @@ jobs:
             bundles: nsis
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.label }})
+    env:
+      # Job-level so step `if:` can see it (secrets can't be read in `if:`).
+      # Empty when the repo has no signing secrets: the import step is skipped and
+      # Tauri falls back to the ad-hoc "-" identity without notarisation.
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -95,9 +100,8 @@ jobs:
       # Keep the bundle identifier and Apple Developer team stable so macOS can
       # preserve the app's designated requirement across releases.
       - name: Import macOS signing certificate
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && env.MACOS_CERTIFICATE != ''
         env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
@@ -120,14 +124,25 @@ jobs:
 
           rm -f "$CERT_PATH"
 
-      - name: Tauri build
+      # Export the signing identity (overrides the ad-hoc "-" in tauri.conf.json) and
+      # the notarisation credentials only when the secrets exist. Even empty values
+      # would override "-" and make Tauri try to notarise, so otherwise leave them unset.
+      - name: Export macOS signing environment
+        if: matrix.os == 'macos-latest' && env.MACOS_CERTIFICATE != ''
         env:
-          # Empty on Windows; set on macOS to override the ad-hoc "-" in tauri.conf.json.
-          APPLE_SIGNING_IDENTITY: ${{ matrix.os == 'macos-latest' && secrets.MACOS_SIGNING_IDENTITY || '' }}
-          # Tauri uses these credentials to notarize and staple the macOS DMG.
-          APPLE_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ matrix.os == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          {
+            echo "APPLE_SIGNING_IDENTITY=$MACOS_SIGNING_IDENTITY"
+            echo "APPLE_ID=$APPLE_ID"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Tauri build
         run: npx tauri build --bundles ${{ matrix.bundles }} ${{ matrix.rust_target && format('--target {0}', matrix.rust_target) || '' }}
 
       - name: Upload macOS artifacts

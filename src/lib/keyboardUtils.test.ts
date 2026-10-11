@@ -8,6 +8,11 @@ import {
   parseHotkeyParts,
   bareKeyToken,
   isBareKeyToken,
+  isMouseButtonToken,
+  mouseButtonLabel,
+  mouseButtonOptionLabel,
+  mouseButtonToken,
+  MOUSE_BUTTON_TOKENS,
 } from "./keyboardUtils";
 
 function keyEvent(
@@ -124,5 +129,47 @@ describe("bareKeyToken", () => {
     expect(isBareKeyToken("F15")).toBe(true);
     expect(isBareKeyToken("§")).toBe(false);
     expect(isBareKeyToken("A")).toBe(false);
+  });
+});
+
+describe("mouse button hotkeys", () => {
+  it("maps DOM MouseEvent.button to 1-based tokens", () => {
+    expect(mouseButtonToken(1)).toBe("Mouse3");
+    expect(mouseButtonToken(3)).toBe("Mouse4");
+    expect(mouseButtonToken(4)).toBe("Mouse5");
+    expect(mouseButtonToken(5)).toBe("Mouse6");
+    expect(mouseButtonToken(7)).toBe("Mouse8");
+  });
+
+  it("never maps left or right click, or unknown buttons", () => {
+    expect(mouseButtonToken(0)).toBeNull();
+    expect(mouseButtonToken(2)).toBeNull();
+    expect(mouseButtonToken(8)).toBeNull();
+    expect(mouseButtonToken(-1)).toBeNull();
+  });
+
+  it("recognises only the allowlisted tokens", () => {
+    for (const token of ["Mouse3", "Mouse4", "Mouse5", "Mouse8"]) {
+      expect(isMouseButtonToken(token)).toBe(true);
+    }
+    for (const token of ["Mouse1", "Mouse2", "Mouse9", "mouse4", "Mouse04"]) {
+      expect(isMouseButtonToken(token)).toBe(false);
+    }
+    expect(MOUSE_BUTTON_TOKENS).not.toContain("Mouse1");
+    expect(MOUSE_BUTTON_TOKENS).not.toContain("Mouse2");
+  });
+
+  it("labels buttons for display and for the picker", () => {
+    expect(mouseButtonLabel("Mouse4")).toBe("Mouse button 4 (Back)");
+    expect(mouseButtonLabel("Mouse3")).toBe("Mouse button 3 (Middle)");
+    expect(mouseButtonLabel("Mouse6")).toBe("Mouse button 6");
+    expect(mouseButtonOptionLabel("Mouse5")).toBe("Forward (5)");
+    expect(mouseButtonOptionLabel("Mouse7")).toBe("Button 7");
+  });
+
+  it("shows a mouse hotkey by name in the hotkey label", () => {
+    expect(formatHotkeyLabel("Mouse4")).toBe("Mouse button 4 (Back)");
+    expect(formatKeySymbol("Mouse5")).toBe("Mouse button 5 (Forward)");
+    expect(parseHotkeyParts("Mouse4")).toEqual(["Mouse4"]);
   });
 });

@@ -207,19 +207,20 @@ mod macos_fn {
             }
         }
 
-        /// Start a tap on one non-modifier key (macOS virtual `keycode`). Its KeyDown/
-        /// KeyUp events are swallowed so the key never types, and autorepeat KeyDowns
-        /// are dropped so holding it yields exactly one press and one release.
+        /// Start a tap on one non-modifier key or extra mouse button (`target`). Its
+        /// down/up events are swallowed so the key never types and the button never
+        /// clicks, and autorepeat KeyDowns are dropped so holding it yields exactly one
+        /// press and one release. Other keys and buttons pass through untouched.
         /// Needs a filtering (non-listen-only) CGEventTap, hence Accessibility.
-        pub fn start_key<F: Fn(bool) + Send + Sync + 'static>(
-            keycode: u16,
+        pub fn start_target<F: Fn(bool) + Send + Sync + 'static>(
+            target: super::TapTarget,
             callback: F,
         ) -> Result<Self, String> {
             let running = Arc::new(AtomicBool::new(true));
             let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
             let running_clone = running.clone();
             let thread = std::thread::spawn(move || {
-                Self::run_key_tap(keycode, callback, running_clone, tx);
+                Self::run_target_tap(target, callback, running_clone, tx);
             });
 
             let result = rx
@@ -235,49 +236,65 @@ mod macos_fn {
             })
         }
 
-        fn run_key_tap<F: Fn(bool) + Send + Sync + 'static>(
-            keycode: u16,
+        fn run_target_tap<F: Fn(bool) + Send + Sync + 'static>(
+            target: super::TapTarget,
             cb: F,
             running: Arc<AtomicBool>,
             tx: std::sync::mpsc::Sender<Result<(), String>>,
         ) {
+            use super::TapTarget;
             use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
             use core_graphics::event::{
                 CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
                 CGEventType, EventField,
             };
 
+            let event_types = match target {
+                TapTarget::Key(_) => vec![CGEventType::KeyDown, CGEventType::KeyUp],
+                TapTarget::MouseButton(_) => {
+                    vec![CGEventType::OtherMouseDown, CGEventType::OtherMouseUp]
+                }
+            };
             let was_down = AtomicBool::new(false);
             let tap = CGEventTap::new(
                 CGEventTapLocation::Session,
                 CGEventTapPlacement::HeadInsertEventTap,
                 CGEventTapOptions::Default,
-                vec![CGEventType::KeyDown, CGEventType::KeyUp],
+                event_types,
                 move |_proxy, event_type, event: &CGEvent| {
                     let key_down = match event_type {
-                        CGEventType::KeyDown => true,
-                        CGEventType::KeyUp => false,
+                        CGEventType::KeyDown | CGEventType::OtherMouseDown => true,
+                        CGEventType::KeyUp | CGEventType::OtherMouseUp => false,
                         CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {
                             log::warn!("[hotkey] key tap disabled by macOS; re-enabling");
                             return None;
                         }
                         _ => return None,
                     };
-                    if event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE)
-                        != i64::from(keycode)
-                    {
+                    let (field, wanted) = match target {
+                        TapTarget::Key(keycode) => {
+                            (EventField::KEYBOARD_EVENT_KEYCODE, i64::from(keycode))
+                        }
+                        TapTarget::MouseButton(button) => {
+                            (EventField::MOUSE_EVENT_BUTTON_NUMBER, i64::from(button))
+                        }
+                    };
+                    if event.get_integer_value_field(field) != wanted {
                         return None;
                     }
-                    let autorepeat =
-                        event.get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT) != 0;
+                    // Mouse buttons don't autorepeat; the field only exists on key events.
+                    let autorepeat = matches!(target, TapTarget::Key(_))
+                        && event.get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT)
+                            != 0;
                     let prev = was_down.load(Ordering::SeqCst);
                     if let Some(pressed) = super::key_edge(key_down, autorepeat, prev) {
                         was_down.store(pressed, Ordering::SeqCst);
                         cb(pressed);
                     }
                     // Swallow every event for the hotkey (autorepeats too) so it never
-                    // types. core-graphics 0.24 treats a `None` return as pass-through
-                    // and can't return NULL, so the event is nulled out instead.
+                    // types or clicks (no browser back/forward, no middle-click paste).
+                    // core-graphics 0.24 treats a `None` return as pass-through and
+                    // can't return NULL, so the event is nulled out instead.
                     event.set_type(CGEventType::Null);
                     None
                 },
@@ -378,9 +395,9 @@ impl HotkeyManager {
         if let Some(mask) = single_modifier_mask(hotkey) {
             log::info!("[hotkey] using modifier tap for {hotkey:?} (mask=0x{mask:x})");
             self.register_modifier_tap(hotkey, mask, app_handle)
-        } else if let Some(keycode) = bare_key_keycode(hotkey) {
-            log::info!("[hotkey] using key tap for {hotkey:?} (keycode=0x{keycode:x})");
-            self.register_key_tap(hotkey, keycode, app_handle)
+        } else if let Some(target) = tap_target(hotkey) {
+            log::info!("[hotkey] using key tap for {hotkey:?} ({target:?})");
+            self.register_key_tap(hotkey, target, app_handle)
         } else {
             log::info!("[hotkey] using global-shortcut plugin for {hotkey:?}");
             self.register_modifier_key(hotkey, app_handle)
@@ -391,6 +408,9 @@ impl HotkeyManager {
     fn register_impl(&self, hotkey: &str, app_handle: AppHandle) -> Result<(), String> {
         if hotkey == "Fn" {
             return Err("Fn key is only supported on macOS".to_string());
+        }
+        if mouse_button_number(hotkey).is_some() {
+            return Err(MOUSE_MACOS_ONLY.to_string());
         }
         log::info!("[hotkey] using global-shortcut plugin for {hotkey:?}");
         // Single modifiers can't be watched natively here; register_modifier_key
@@ -447,13 +467,13 @@ impl HotkeyManager {
     fn register_key_tap(
         &self,
         hotkey: &str,
-        keycode: u16,
+        target: TapTarget,
         app_handle: AppHandle,
     ) -> Result<(), String> {
         let hotkey_label = hotkey.to_string();
-        let tap = macos_fn::FnKeyTap::start_key(keycode, move |pressed| {
+        let tap = macos_fn::FnKeyTap::start_target(target, move |pressed| {
             let state = if pressed { "pressed" } else { "released" };
-            log::info!("[hotkey] key tap: {state} hotkey={hotkey_label:?} keycode=0x{keycode:x}");
+            log::info!("[hotkey] key tap: {state} hotkey={hotkey_label:?} {target:?}");
             let event = if pressed {
                 "hotkey-pressed"
             } else {
@@ -519,6 +539,8 @@ fn registration_method(hotkey: &str) -> &'static str {
         "modifier-tap"
     } else if bare_key_keycode(hotkey).is_some() {
         "key-tap"
+    } else if mouse_button_number(hotkey).is_some() {
+        "mouse-button-tap"
     } else if hotkey.contains('+') {
         "global-shortcut (combo)"
     } else {
@@ -580,6 +602,38 @@ fn bare_key_keycode(hotkey: &str) -> Option<u16> {
     Some(keycode)
 }
 
+/// Maps an extra-mouse-button token ("Mouse3" middle, "Mouse4" back, "Mouse5"
+/// forward … "Mouse8") to its CoreGraphics button number, which is 0-based (left
+/// = 0), so `MouseN` → N-1. Left and right click (Mouse1/Mouse2) are never allowed:
+/// swallowing them would make the mouse unusable.
+fn mouse_button_number(hotkey: &str) -> Option<u8> {
+    let n: u8 = hotkey.strip_prefix("Mouse")?.parse().ok()?;
+    // Reject "Mouse04"/"Mouse+4" so only the canonical token is ever stored.
+    if !(3..=8).contains(&n) || hotkey != format!("Mouse{n}") {
+        return None;
+    }
+    Some(n - 1)
+}
+
+#[cfg(not(target_os = "macos"))]
+const MOUSE_MACOS_ONLY: &str = "Mouse-button hotkeys are macOS-only for now";
+
+/// What a filtering CGEventTap watches: a non-modifier key (macOS virtual keycode)
+/// or an extra mouse button (CoreGraphics button number).
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TapTarget {
+    Key(u16),
+    MouseButton(u8),
+}
+
+#[cfg(target_os = "macos")]
+fn tap_target(hotkey: &str) -> Option<TapTarget> {
+    bare_key_keycode(hotkey)
+        .map(TapTarget::Key)
+        .or_else(|| mouse_button_number(hotkey).map(TapTarget::MouseButton))
+}
+
 /// Hotkey edge for an event on the watched key: `Some(true)` on the first KeyDown,
 /// `Some(false)` on the KeyUp that ends it, `None` for autorepeat KeyDowns and
 /// KeyUps with no matching press. A hold therefore gives exactly one start and stop.
@@ -617,8 +671,13 @@ pub fn validate_hotkey(hotkey: &str) -> Result<(), String> {
     }
 
     #[cfg(target_os = "macos")]
-    if single_modifier_mask(hotkey).is_some() || bare_key_keycode(hotkey).is_some() {
+    if single_modifier_mask(hotkey).is_some() || tap_target(hotkey).is_some() {
         return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    if mouse_button_number(hotkey).is_some() {
+        return Err(MOUSE_MACOS_ONLY.into());
     }
 
     if hotkey.contains('+') {
@@ -745,6 +804,40 @@ mod validation_tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn accepts_extra_mouse_buttons_on_macos() {
+        for hotkey in ["Mouse3", "Mouse4", "Mouse5", "Mouse8"] {
+            assert!(validate_hotkey(hotkey).is_ok(), "{hotkey}");
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn rejects_mouse_buttons_off_macos_with_clear_error() {
+        let err = validate_hotkey("Mouse4").unwrap_err();
+        assert!(err.contains("macOS-only"), "{err}");
+    }
+
+    #[test]
+    fn rejects_left_right_click_and_malformed_mouse_tokens() {
+        for hotkey in [
+            "Mouse1",
+            "Mouse2",
+            "Mouse0",
+            "Mouse9",
+            "Mouse",
+            "Mouse04",
+            "Mouse+4",
+            "mouse4",
+            "Mouse-1",
+            "MouseX",
+            "Cmd+Mouse4",
+        ] {
+            assert!(validate_hotkey(hotkey).is_err(), "{hotkey}");
+        }
+    }
+
     #[test]
     fn canonicalizes_section_alias() {
         use super::canonical_hotkey;
@@ -754,9 +847,32 @@ mod validation_tests {
     }
 }
 
+#[cfg(test)]
+mod mouse_button_tests {
+    use super::mouse_button_number;
+
+    #[test]
+    fn mouse_tokens_map_to_zero_based_cg_button_numbers() {
+        assert_eq!(mouse_button_number("Mouse3"), Some(2));
+        assert_eq!(mouse_button_number("Mouse4"), Some(3));
+        assert_eq!(mouse_button_number("Mouse5"), Some(4));
+        assert_eq!(mouse_button_number("Mouse8"), Some(7));
+    }
+
+    #[test]
+    fn left_right_click_and_garbage_are_not_mouse_hotkeys() {
+        for hotkey in [
+            "Mouse1", "Mouse2", "Mouse0", "Mouse9", "Mouse256", "Mouse", "Mouse04", "Mouse+4",
+            "mouse4", "MOUSE4", " Mouse4", "Mouse4 ", "Mouse-3", "F13", "Section", "",
+        ] {
+            assert_eq!(mouse_button_number(hotkey), None, "{hotkey:?}");
+        }
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod bare_key_tests {
-    use super::{bare_key_keycode, key_edge, registration_method};
+    use super::{bare_key_keycode, key_edge, registration_method, tap_target, TapTarget};
 
     #[test]
     fn section_maps_to_iso_section_keycode() {
@@ -772,8 +888,27 @@ mod bare_key_tests {
         assert_eq!(registration_method("Section"), "key-tap");
         assert_eq!(registration_method("§"), "key-tap");
         assert_eq!(registration_method("F15"), "key-tap");
+        assert_eq!(registration_method("Mouse4"), "mouse-button-tap");
+        assert_ne!(registration_method("Mouse1"), "mouse-button-tap");
         assert_eq!(registration_method("Fn"), "modifier-tap");
         assert_eq!(registration_method("Ctrl+Space"), "global-shortcut (combo)");
+    }
+
+    #[test]
+    fn tap_target_routes_keys_and_mouse_buttons() {
+        assert_eq!(tap_target("Section"), Some(TapTarget::Key(0x0a)));
+        assert_eq!(tap_target("F13"), Some(TapTarget::Key(0x69)));
+        assert_eq!(tap_target("Mouse3"), Some(TapTarget::MouseButton(2)));
+        assert_eq!(tap_target("Mouse5"), Some(TapTarget::MouseButton(4)));
+        assert_eq!(tap_target("Mouse2"), None);
+        assert_eq!(tap_target("Fn"), None);
+        assert_eq!(tap_target("Ctrl+Space"), None);
+    }
+
+    #[test]
+    fn mouse_button_hold_gives_one_start_and_one_stop() {
+        // Mouse buttons never autorepeat: down, up → one press, one release.
+        assert_eq!(edges(&[(true, false), (false, false)]), vec![true, false]);
     }
 
     /// Feed (key_down, autorepeat) events through key_edge, tracking state like the tap.

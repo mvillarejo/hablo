@@ -490,6 +490,7 @@ export function ScreenshotGallery() {
             cancelCapture={noop}
             saveCapture={noop}
             handleResetHotkey={noop}
+            recordMouseButton={noop}
             defaultHotkey="Fn"
             isMac
             permissions={{ hotkeyError: null }}

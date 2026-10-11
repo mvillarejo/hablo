@@ -1770,6 +1770,16 @@ select.form-input {
   justify-content: center;
 }
 
+.shortcut-mouse-select {
+  width: auto;
+  font-size: var(--font-size-12);
+}
+
+select.shortcut-mouse-select {
+  padding-right: 26px;
+  background-position: right 8px center;
+}
+
 .form-footnote {
   font-size: var(--font-size-12);
   margin-top: var(--space-1);

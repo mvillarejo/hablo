@@ -3,6 +3,8 @@ import {
   formatKeySymbol,
   sortKeys,
   parseHotkeyParts,
+  mouseButtonOptionLabel,
+  MOUSE_BUTTON_TOKENS,
 } from "../lib/keyboardUtils";
 import { InfoTooltip } from "./InfoTooltip";
 import { SettingsPageLayout } from "./SettingsPageLayout";
@@ -28,6 +30,7 @@ export function AppSettingsView({
   cancelCapture,
   saveCapture,
   handleResetHotkey,
+  recordMouseButton,
   defaultHotkey,
   isMac,
   permissions,
@@ -59,6 +62,7 @@ export function AppSettingsView({
   cancelCapture: () => void;
   saveCapture: () => void;
   handleResetHotkey: () => void;
+  recordMouseButton: (token: string) => void;
   defaultHotkey: string;
   isMac: boolean;
   permissions: { hotkeyError: string | null };
@@ -111,6 +115,15 @@ export function AppSettingsView({
                     won't type §)
                   </li>
                 )}
+                {isMac && (
+                  <li>
+                    A mouse button other than left/right click: click Edit, then
+                    press it or choose it from the Mouse menu. For a Logitech
+                    mouse, in Logi Options+ set the button to Middle, Back or
+                    Forward and choose that mouse button in TTM, or set it to a
+                    keystroke F13–F19 and record that key
+                  </li>
+                )}
                 <li>Press Escape to cancel</li>
               </ul>
             </InfoTooltip>
@@ -141,6 +154,25 @@ export function AppSettingsView({
                   >
                     Cancel
                   </button>
+                  {isMac && (
+                    <select
+                      className="form-input shortcut-mouse-select"
+                      aria-label="Use a mouse button"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) recordMouseButton(e.target.value);
+                      }}
+                    >
+                      <option value="" disabled>
+                        Mouse…
+                      </option>
+                      {MOUSE_BUTTON_TOKENS.map((token) => (
+                        <option key={token} value={token}>
+                          {mouseButtonOptionLabel(token)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               </>
             ) : (
