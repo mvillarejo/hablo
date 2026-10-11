@@ -30,8 +30,6 @@ import {
   isSingleModifierToken,
   bareKeyToken,
   isBareKeyToken,
-  isMouseButtonToken,
-  mouseButtonToken,
   formatHotkeyLabel,
   formatKeyboardEventForLog,
 } from "./lib/keyboardUtils";
@@ -175,7 +173,6 @@ export default function App() {
   });
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
   const [platform, setPlatform] = useState<string>("macos");
-  const [region, setRegion] = useState<string>("");
   const [appVersion, setAppVersion] = useState<string>("");
   const [languageDropdownOpen, setLanguageDropdownOpen] = useState(false);
   const [activationDropdownOpen, setActivationDropdownOpen] = useState(false);
@@ -517,9 +514,6 @@ export default function App() {
     const init = async () => {
       const p = await invoke<string>("get_platform").catch(() => "macos");
       setPlatform(p);
-
-      const r = await invoke<string>("get_region").catch(() => "");
-      setRegion(r);
 
       const v = await getVersion().catch(() => "");
       setAppVersion(v);
@@ -1059,16 +1053,6 @@ export default function App() {
     await handleHotkeyChange(DEFAULT_HOTKEY);
   };
 
-  // Record an extra mouse button as the pending hotkey (from a click in the
-  // webview or the mouse-button picker); Save commits it like any shortcut.
-  const recordMouseButton = (token: string) => {
-    if (!isCapturingRef.current) return;
-    pressedKeysRef.current.clear();
-    recordedHotkeyRef.current = token;
-    setRecordingKeys([token]);
-    logHotkey(`capture state: recorded=${token}`);
-  };
-
   const exitCapture = () => {
     isCapturingRef.current = false;
     setIsCapturing(false);
@@ -1123,8 +1107,7 @@ export default function App() {
       isMac &&
       recordingKeys.length === 1 &&
       (isSingleModifierToken(recordingKeys[0]) ||
-        isBareKeyToken(recordingKeys[0]) ||
-        isMouseButtonToken(recordingKeys[0]))
+        isBareKeyToken(recordingKeys[0]))
     ) {
       return true;
     }
@@ -1205,27 +1188,11 @@ export default function App() {
       if (token) pressedKeysRef.current.delete(token);
     };
 
-    // Best effort: WKWebView may not deliver every extra mouse button, so the
-    // settings also offer an explicit mouse-button picker.
-    const onMouseDown = (e: MouseEvent) => {
-      if (!isCapturingRef.current || !isMac) return;
-      const token = mouseButtonToken(e.button);
-      logHotkey(
-        `capture mousedown: button=${e.button} token=${token ?? "null"}`,
-      );
-      if (!token) return;
-      e.preventDefault();
-      e.stopPropagation();
-      recordMouseButton(token);
-    };
-
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("keyup", onKeyUp, true);
-    window.addEventListener("mousedown", onMouseDown, true);
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("mousedown", onMouseDown, true);
     };
   }, [isCapturing, isMac]);
 
@@ -1978,11 +1945,9 @@ export default function App() {
               cancelCapture={cancelCapture}
               saveCapture={saveCapture}
               handleResetHotkey={handleResetHotkey}
-              recordMouseButton={recordMouseButton}
               defaultHotkey={DEFAULT_HOTKEY}
               isMac={isMac}
               permissions={permissions}
-              region={region}
               version={appVersion}
               onDone={() => setNavScreen("home")}
               onOpenLogs={() => invoke("open_log_folder").catch(console.error)}

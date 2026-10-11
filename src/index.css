@@ -1770,16 +1770,6 @@ select.form-input {
   justify-content: center;
 }
 
-.shortcut-mouse-select {
-  width: auto;
-  font-size: var(--font-size-12);
-}
-
-select.shortcut-mouse-select {
-  padding-right: 26px;
-  background-position: right 8px center;
-}
-
 .form-footnote {
   font-size: var(--font-size-12);
   margin-top: var(--space-1);
@@ -1793,7 +1783,7 @@ select.shortcut-mouse-select {
   color: var(--status-error);
 }
 
-.settings-region-footer {
+.settings-version-footer {
   font-size: var(--font-size-12);
   color: var(--text-tertiary);
   opacity: 0.6;

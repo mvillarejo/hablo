@@ -72,22 +72,15 @@ Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint
 
 You can keep several profiles, for example two Ollama servers with different models, or a work and a personal Gladia account. One profile is active at a time. Switch it in **Transcription settings** or from the **Provider** submenu of the menu bar icon. A switch during a dictation takes effect on the next one. Languages and custom vocabulary are shared by all profiles.
 
-## Using a mouse button (Logitech or any multi-button mouse)
+## Using a Logitech mouse button
 
-On macOS you can dictate by holding an extra mouse button, in the same way as the keyboard shortcut: press to start, release to transcribe and paste. Left and right click can't be used.
+Logi Options+ takes over the extra buttons on a Logitech mouse, so TTM can't see them. Map the button to your trigger key instead:
 
-1. Open **App settings** and click **Edit** next to the trigger key.
-2. Press the mouse button, or choose it from the **Mouse** menu: Middle (3), Back (4), Forward (5), or Button 6 to 8.
-3. Click **Save**.
+1. In Logi Options+, select the button and choose **Keyboard shortcut**.
+2. Press your TTM trigger key (for example <kbd>§</kbd> or <kbd>F13</kbd>) to record it.
+3. If you use app-specific profiles in Options+, set the same shortcut in each one.
 
-While a mouse button is the trigger, TTM swallows its clicks, so Back no longer goes back in your browser and middle click no longer opens links in a new tab. Other buttons work as usual.
-
-With a Logitech mouse, open Logi Options+, select the button and assign it one of:
-
-- **Middle button**, **Back** or **Forward**, then choose the same mouse button in TTM.
-- A keystroke of F13 to F19 with no modifier, then click **Edit** in TTM and press the button to record that key.
-
-If TTM doesn't react to the mouse button, use the keystroke option instead.
+Then hold the button to dictate, as you would hold the key.
 
 ## Development
 
@@ -178,7 +171,6 @@ The UI uses two windows: `main` for onboarding, history, and settings; and `over
 | Capability | macOS | Windows |
 | --- | --- | --- |
 | Default shortcut | <kbd>Fn</kbd> / <kbd>Globe</kbd> | <kbd>Ctrl</kbd> + <kbd>Space</kbd> |
-| Mouse-button shortcut | Middle, Back, Forward, buttons 6 to 8 | Not supported |
 | Paste integration | CoreGraphics <kbd>Cmd</kbd> + <kbd>V</kbd> | enigo <kbd>Ctrl</kbd> + <kbd>V</kbd> |
 | Clipboard | `pbcopy` / `pbpaste` | `arboard` |
 | Required permissions | Microphone and Accessibility | Microphone |

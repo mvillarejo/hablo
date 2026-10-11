@@ -122,53 +122,6 @@ export function isBareKeyToken(token: string): boolean {
   return Object.values(BARE_KEY_FROM_CODE).includes(token);
 }
 
-// Extra mouse buttons that may be the hotkey on their own (macOS only). Tokens use
-// the human 1-based button number; left and right click (Mouse1/Mouse2) are never
-// allowed, since swallowing them would make the mouse unusable.
-export const MOUSE_BUTTON_TOKENS = [
-  "Mouse3",
-  "Mouse4",
-  "Mouse5",
-  "Mouse6",
-  "Mouse7",
-  "Mouse8",
-];
-
-const MOUSE_BUTTON_NAMES: Record<string, string> = {
-  Mouse3: "Middle",
-  Mouse4: "Back",
-  Mouse5: "Forward",
-};
-
-/** True for a hotkey that is an allowlisted extra mouse button (e.g. "Mouse4"). */
-export function isMouseButtonToken(token: string): boolean {
-  return MOUSE_BUTTON_TOKENS.includes(token);
-}
-
-/** Display label for a mouse-button hotkey, e.g. "Mouse button 4 (Back)". */
-export function mouseButtonLabel(token: string): string {
-  const n = token.slice("Mouse".length);
-  const name = MOUSE_BUTTON_NAMES[token];
-  return name ? `Mouse button ${n} (${name})` : `Mouse button ${n}`;
-}
-
-/** Short label for the mouse-button picker, e.g. "Back (4)" or "Button 6". */
-export function mouseButtonOptionLabel(token: string): string {
-  const n = token.slice("Mouse".length);
-  const name = MOUSE_BUTTON_NAMES[token];
-  return name ? `${name} (${n})` : `Button ${n}`;
-}
-
-/**
- * Hotkey token for a DOM MouseEvent.button (0 left, 1 middle, 2 right, 3 back,
- * 4 forward…), else null. Left and right click never map to a token.
- */
-export function mouseButtonToken(button: number): string | null {
-  if (button === 0 || button === 2) return null;
-  const token = button === 1 ? "Mouse3" : `Mouse${button + 1}`;
-  return isMouseButtonToken(token) ? token : null;
-}
-
 /** Returns the side-qualified token for a modifier KeyboardEvent.code, else null. */
 export function modifierSideToken(code: string): string | null {
   return MODIFIER_CODE_TO_SIDE_TOKEN[code] ?? null;
@@ -253,7 +206,6 @@ export function isModifier(key: string): boolean {
 }
 
 export function formatKeySymbol(key: string): string {
-  if (isMouseButtonToken(key)) return mouseButtonLabel(key);
   const base = SIDE_TOKEN_TO_BASE[key];
   if (base) {
     const side = key.endsWith("Right") ? "R" : "L";
