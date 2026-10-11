@@ -30,6 +30,11 @@ jobs:
             bundles: nsis
     runs-on: ${{ matrix.os }}
     name: Build (${{ matrix.label }})
+    env:
+      # Job-level so step `if:` can see it (secrets can't be read in `if:`).
+      # Empty when the repo has no signing secrets: the import step is skipped and
+      # Tauri falls back to the ad-hoc "-" identity without notarisation.
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
     steps:
       - uses: actions/checkout@v6
 
@@ -95,9 +100,8 @@ jobs:
       # Keep the bundle identifier and Apple Developer team stable so macOS can
       # preserve the app's designated requirement across releases.
       - name: Import macOS signing certificate
-        if: matrix.os == 'macos-latest'
+        if: matrix.os == 'macos-latest' && env.MACOS_CERTIFICATE != ''
         env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
