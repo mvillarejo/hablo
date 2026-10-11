@@ -18,6 +18,7 @@ mod gladia;
 mod history;
 mod hotkey;
 mod hotkey_layout;
+mod indicator;
 mod permissions;
 mod region;
 mod transcriber;
@@ -175,6 +176,8 @@ async fn set_tray_activity(
     state: State<'_, AppState>,
     activity: String,
 ) -> Result<(), String> {
+    let enabled = config::show_indicator().unwrap_or(true);
+    indicator::apply(&app, indicator::phase_for_activity(&activity), enabled);
     apply_tray_activity(&app, &state, &activity).await
 }
 
@@ -833,9 +836,16 @@ async fn start_audio_capture(
     let ready_app = app_handle.clone();
     let ready_capture_id = capture_id.unwrap_or_default();
     let capture_started = Instant::now();
+    let show_level = config::show_indicator().unwrap_or(true);
     tokio::task::spawn_blocking(move || {
         let mut readiness = FirstAudioChunkGate::default();
+        let mut meter = indicator::LevelMeter::default();
         while let Ok(chunk) = rx.recv() {
+            if show_level {
+                if let Some(level) = meter.observe(&chunk.data, Instant::now()) {
+                    let _ = ready_app.emit_to(indicator::LABEL, "mic-level", level);
+                }
+            }
             if readiness.observe() {
                 let _ = ready_app.emit(
                     "audio-capture-ready",
@@ -1450,6 +1460,8 @@ fn main() {
                 })
                 .build(app)?;
 
+            indicator::setup(app.handle());
+
             // Intercept window close: hide instead of destroying
             if let Some(window) = app.get_webview_window("main") {
                 let w = window.clone();
@@ -1505,6 +1517,9 @@ fn main() {
             config::get_language_settings,
             config::save_copy_to_clipboard,
             config::get_copy_to_clipboard,
+            config::save_show_indicator,
+            config::get_show_indicator,
+            indicator::get_indicator_phase,
             config::save_activation_mode,
             config::get_activation_mode,
             config::save_audio_device_selection,

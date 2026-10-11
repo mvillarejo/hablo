@@ -27,6 +27,7 @@ const SCREENS = screensArg
       "07d-profile-delete-confirm",
       "08-app-settings",
       "09-language-picker",
+      "10-floating-indicator",
     ];
 
 const baseUrl = process.env.SCREENSHOT_BASE_URL ?? "http://localhost:1420";

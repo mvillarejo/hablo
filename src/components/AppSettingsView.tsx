@@ -220,28 +220,55 @@ export function AppSettingsView({
         </div>
       </div>
 
-      <div className="form-group">
-        <label className="form-label">
-          Copy to clipboard
-          <InfoTooltip label="About copy to clipboard">
-            <strong>Copy to clipboard</strong>
-            When on, the full transcription is left on your clipboard after each
-            dictation.
-          </InfoTooltip>
-        </label>
-        <label className="toggle-switch" title="Copy to clipboard">
-          <input
-            type="checkbox"
-            checked={settings.copyToClipboard}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                copyToClipboard: e.target.checked,
-              })
-            }
-          />
-          <span className="toggle-slider" />
-        </label>
+      <div className="settings-row">
+        <div className="form-group">
+          <label className="form-label">
+            Copy to clipboard
+            <InfoTooltip label="About copy to clipboard">
+              <strong>Copy to clipboard</strong>
+              When on, the full transcription is left on your clipboard after
+              each dictation.
+            </InfoTooltip>
+          </label>
+          <label className="toggle-switch" title="Copy to clipboard">
+            <input
+              type="checkbox"
+              checked={settings.copyToClipboard}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  copyToClipboard: e.target.checked,
+                })
+              }
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">
+            Show floating indicator
+            <InfoTooltip label="About the floating indicator">
+              <strong>Show floating indicator</strong>A small pill at the bottom
+              of your screen shows your mic level while you dictate and a
+              spinner while the text is on its way. It never takes focus from
+              the app you are typing in.
+            </InfoTooltip>
+          </label>
+          <label className="toggle-switch" title="Show floating indicator">
+            <input
+              type="checkbox"
+              checked={settings.showIndicator}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  showIndicator: e.target.checked,
+                })
+              }
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
       </div>
 
       <div className="form-group">

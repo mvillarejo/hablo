@@ -42,6 +42,7 @@ export interface AppSettings {
   audioDeviceSelection: AudioDeviceSelection;
   hotkey: string;
   copyToClipboard: boolean;
+  showIndicator: boolean;
   customVocabulary: CustomVocabEntry[];
 }
 

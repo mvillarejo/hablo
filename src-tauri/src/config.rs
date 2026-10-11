@@ -44,6 +44,8 @@ struct Config {
     /// Whether to leave the final transcription on the clipboard after a
     /// dictation session (instead of restoring the user's original clipboard).
     copy_to_clipboard: Option<bool>,
+    /// Whether to show the floating "listening" pill while dictating.
+    show_indicator: Option<bool>,
     /// How the trigger key starts a dictation: "push-to-talk" (hold) or
     /// "toggle" (press once to start, once to stop).
     activation_mode: Option<String>,
@@ -90,6 +92,7 @@ impl Default for Config {
             languages: Some(vec!["en".to_string()]),
             code_switching: None,
             copy_to_clipboard: Some(false),
+            show_indicator: Some(true),
             activation_mode: Some(DEFAULT_ACTIVATION_MODE.to_string()),
             custom_vocabulary: Some(default_custom_vocabulary()),
             endpointing: None,
@@ -120,6 +123,9 @@ impl Config {
         }
         if self.copy_to_clipboard.is_none() {
             self.copy_to_clipboard = defaults.copy_to_clipboard;
+        }
+        if self.show_indicator.is_none() {
+            self.show_indicator = defaults.show_indicator;
         }
         if self.activation_mode.is_none() {
             self.activation_mode = defaults.activation_mode;
@@ -368,6 +374,11 @@ fn preserve_custom_vocabulary(path: &Path, config: &mut Config) {
 /// `get_copy_to_clipboard` Tauri command wraps this for the frontend.
 pub fn copy_to_clipboard() -> Result<bool, String> {
     read_config(|config| config.copy_to_clipboard.unwrap_or(false))
+}
+
+/// Whether the floating indicator is on. Defaults to `true` when absent.
+pub fn show_indicator() -> Result<bool, String> {
+    read_config(|config| config.show_indicator.unwrap_or(true))
 }
 
 pub fn audio_device_selection() -> Result<AudioDeviceSelection, String> {
@@ -936,6 +947,18 @@ pub async fn get_copy_to_clipboard() -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub async fn save_show_indicator(enabled: bool) -> Result<(), String> {
+    with_config(|config| {
+        config.show_indicator = Some(enabled);
+    })
+}
+
+#[tauri::command]
+pub async fn get_show_indicator() -> Result<bool, String> {
+    show_indicator()
+}
+
+#[tauri::command]
 pub async fn save_activation_mode(mode: String) -> Result<(), String> {
     if mode != "toggle" && mode != DEFAULT_ACTIVATION_MODE {
         return Err(format!("Unknown activation mode: {mode}"));
@@ -1001,6 +1024,7 @@ mod tests {
             "languages": null,
             "code_switching": null,
             "copy_to_clipboard": null,
+            "show_indicator": null,
             "custom_vocabulary": null,
             "endpointing": null,
             "accessibility_tcc_reset_done": null,
@@ -1013,6 +1037,7 @@ mod tests {
         assert_eq!(config.hotkey.as_deref(), Some(default_hotkey().as_str()));
         assert_eq!(config.languages, Some(vec!["en".to_string()]));
         assert_eq!(config.copy_to_clipboard, Some(false));
+        assert_eq!(config.show_indicator, Some(true));
         assert_eq!(config.custom_vocabulary, Some(default_custom_vocabulary()));
         // Moved into the profile: the legacy fields stay unset.
         assert!(config.code_switching.is_none());
@@ -1037,6 +1062,23 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("stt_api_key"));
         assert!(!json.contains("\"provider\""));
+    }
+
+    #[test]
+    fn floating_indicator_defaults_on_for_existing_configs_and_keeps_an_opt_out() {
+        let dir = TestConfigDir::new();
+        let path = dir.config_path();
+        fs::write(&path, r#"{"hotkey":"Fn","copy_to_clipboard":true}"#).unwrap();
+        assert_eq!(
+            load_config_from_path(&path).unwrap().show_indicator,
+            Some(true)
+        );
+        fs::write(&path, r#"{"hotkey":"Fn","show_indicator":false}"#).unwrap();
+        assert_eq!(
+            load_config_from_path(&path).unwrap().show_indicator,
+            Some(false)
+        );
+        assert!(serde_json::from_str::<Config>(r#"{"show_indicator":"yes"}"#).is_err());
     }
 
     #[test]

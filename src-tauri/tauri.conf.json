@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
@@ -19,6 +20,23 @@
         "resizable": false,
         "fullscreen": false,
         "visible": true
+      },
+      {
+        "label": "indicator",
+        "title": "TTM indicator",
+        "url": "indicator.html",
+        "width": 120,
+        "height": 48,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "shadow": false,
+        "visible": false
       }
     ]
   },

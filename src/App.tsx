@@ -169,6 +169,7 @@ export default function App() {
     audioDeviceSelection: { mode: "automatic" },
     hotkey: "Fn",
     copyToClipboard: false,
+    showIndicator: true,
     customVocabulary: DEFAULT_CUSTOM_VOCABULARY,
   });
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
@@ -214,6 +215,7 @@ export default function App() {
   const languageSettingsLoaded = useRef(false);
   const vocabularySettingsLoaded = useRef(false);
   const copyToClipboardLoaded = useRef(false);
+  const showIndicatorLoaded = useRef(false);
   const activationModeLoaded = useRef(false);
   const audioDeviceSelectionLoaded = useRef(false);
 
@@ -279,7 +281,9 @@ export default function App() {
         : "recording"
       : isProcessing
         ? "finalizing"
-        : "idle";
+        : status.phase === "error"
+          ? "error"
+          : "idle";
     invoke("set_tray_activity", { activity }).catch(console.error);
   }, [isRecording, isProcessing, status.phase]);
   useEffect(() => {
@@ -311,6 +315,12 @@ export default function App() {
       enabled: settings.copyToClipboard,
     }).catch(console.error);
   }, [settings.copyToClipboard]);
+  useEffect(() => {
+    if (!showIndicatorLoaded.current) return;
+    invoke("save_show_indicator", {
+      enabled: settings.showIndicator,
+    }).catch(console.error);
+  }, [settings.showIndicator]);
   useEffect(() => {
     if (!activationModeLoaded.current) return;
     invoke("save_activation_mode", { mode: settings.activationMode }).catch(
@@ -542,6 +552,10 @@ export default function App() {
         "get_copy_to_clipboard",
       ).catch(() => false);
 
+      const savedShowIndicator = await invoke<boolean>(
+        "get_show_indicator",
+      ).catch(() => true);
+
       const savedActivationMode = await invoke<ActivationMode>(
         "get_activation_mode",
       ).catch(() => "push-to-talk" as ActivationMode);
@@ -557,6 +571,7 @@ export default function App() {
           ? { languages: savedLanguages }
           : {}),
         copyToClipboard: savedCopyToClipboard,
+        showIndicator: savedShowIndicator,
         activationMode: savedActivationMode,
         audioDeviceSelection: savedAudioDeviceSelection,
         customVocabulary: savedVocabulary,
@@ -564,6 +579,7 @@ export default function App() {
       languageSettingsLoaded.current = true;
       vocabularySettingsLoaded.current = true;
       copyToClipboardLoaded.current = true;
+      showIndicatorLoaded.current = true;
       activationModeLoaded.current = true;
       audioDeviceSelectionLoaded.current = true;
       setSettingsReady(true);
@@ -582,6 +598,7 @@ export default function App() {
           audioDeviceSelection: { mode: "automatic" },
           hotkey: settings.hotkey,
           copyToClipboard: settings.copyToClipboard,
+          showIndicator: settings.showIndicator,
           customVocabulary: settings.customVocabulary,
         },
         apiKeySet: !!apiKey,

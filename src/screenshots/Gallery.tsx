@@ -7,6 +7,8 @@ import { HistoryView } from "../components/HistoryView";
 import { CustomVocabularyView } from "../components/CustomVocabularyView";
 import { TranscriptionSettingsView } from "../components/TranscriptionSettingsView";
 import { AppSettingsView } from "../components/AppSettingsView";
+import { Indicator } from "../indicator/Indicator";
+import "../indicator/indicator.css";
 import { DEFAULT_CUSTOM_VOCABULARY } from "../lib/customVocabulary";
 import { DEFAULT_DICTATION_STATS } from "../lib/dictationStats";
 import { EUROPEAN_LANGUAGES } from "../lib/languages";
@@ -22,6 +24,7 @@ const MOCK_SETTINGS: AppSettings = {
   audioDeviceSelection: { mode: "automatic" },
   hotkey: "Fn",
   copyToClipboard: false,
+  showIndicator: true,
   customVocabulary: [
     ...DEFAULT_CUSTOM_VOCABULARY,
     {
@@ -498,6 +501,27 @@ export function ScreenshotGallery() {
             onOpenLogs={noop}
           />
         </AppShell>
+      </ScreenFrame>
+
+      <ScreenFrame
+        id="wrap-10-floating-indicator"
+        label="10 Floating Indicator"
+      >
+        <div id="10-floating-indicator" className="indicator-gallery">
+          {(
+            [
+              ["Listening, quiet", "listening", 0.45, 2],
+              ["Listening, speaking", "listening", 0.85, 5],
+              ["Transcribing", "transcribing", 0, 0],
+              ["Error", "error", 0, 0],
+            ] as const
+          ).map(([label, phase, level, tick]) => (
+            <figure key={label} className="indicator-gallery-item">
+              <Indicator phase={phase} level={level} tick={tick} />
+              <figcaption>{label}</figcaption>
+            </figure>
+          ))}
+        </div>
       </ScreenFrame>
 
       <ScreenFrame id="wrap-09-language-picker" label="09 Language Picker">
