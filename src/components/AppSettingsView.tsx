@@ -111,6 +111,11 @@ export function AppSettingsView({
                     won't type §)
                   </li>
                 )}
+                <li>
+                  Logitech mouse: in Logi Options+, set a button to Keyboard
+                  shortcut and press your trigger key, then hold that button to
+                  dictate. Set it in every app-specific profile, too
+                </li>
                 <li>Press Escape to cancel</li>
               </ul>
             </InfoTooltip>

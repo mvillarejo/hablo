@@ -72,6 +72,16 @@ Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint
 
 You can keep several profiles, for example two Ollama servers with different models, or a work and a personal Gladia account. One profile is active at a time. Switch it in **Transcription settings** or from the **Provider** submenu of the menu bar icon. A switch during a dictation takes effect on the next one. Languages and custom vocabulary are shared by all profiles.
 
+## Using a Logitech mouse button
+
+Logi Options+ takes over the extra buttons on a Logitech mouse, so TTM can't see them. Map the button to your trigger key instead:
+
+1. In Logi Options+, select the button and choose **Keyboard shortcut**.
+2. Press your TTM trigger key (for example <kbd>§</kbd> or <kbd>F13</kbd>) to record it.
+3. If you use app-specific profiles in Options+, set the same shortcut in each one.
+
+Then hold the button to dictate, as you would hold the key.
+
 ## Development
 
 ### Prerequisites
