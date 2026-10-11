@@ -1,8 +1,8 @@
 //! OpenAI-compatible batch speech-to-text provider (`POST {base}/audio/transcriptions`).
 //!
-//! Audio is cut into chunks while the user is still speaking: once
-//! `MIN_CUT_SECONDS` have built up, the next pause ends a chunk (`find_cut`),
-//! with a hard cap at `MAX_CUT_SECONDS`. Each chunk is wrapped as a mono 16-bit
+//! Audio is cut into chunks of whole sentences while the user is still
+//! speaking (`find_cut`): after `MIN_CUT_SECONDS`, the next sentence pause ends
+//! a chunk; breath and comma pauses never do. Each chunk is wrapped as a mono 16-bit
 //! WAV and handed to a sequential queue (`ChunkQueue`) that keeps one request in
 //! flight at a time. On release only the remainder is left to send; the texts
 //! are joined in order and pasted once. Defaults target local Ollama, but any
@@ -21,13 +21,26 @@ use tokio::task::JoinHandle;
 /// No request is ever larger than this, merges included.
 pub const MAX_CHUNK_SECONDS: u32 = 28;
 /// Cut only once this much audio has built up since the last cut.
-pub const MIN_CUT_SECONDS: usize = 10;
-/// Hard cap per chunk when no pause shows up.
-pub const MAX_CUT_SECONDS: usize = 20;
+pub const MIN_CUT_SECONDS: usize = 6;
+/// No sentence pause by now: cut at the longest pause seen so far.
+pub const LONGEST_PAUSE_SECONDS: usize = 15;
+/// Hard cap per chunk, only reached by speech with no pauses at all.
+pub const MAX_CUT_SECONDS: usize = 25;
 /// Energy-VAD analysis frame.
 const FRAME_MS: usize = 20;
-/// A run of quiet frames this long counts as a pause.
-const SILENCE_RUN_MS: usize = 300;
+/// A quiet run this long is a pause; shorter gaps are between words.
+const MIN_PAUSE_MS: usize = 160;
+/// Sentence-pause threshold before the speaker's own pauses say otherwise…
+const SENTENCE_PAUSE_MS: usize = 500;
+/// …and the range the adaptive threshold is clamped to.
+const SENTENCE_PAUSE_RANGE_MS: (usize, usize) = (400, 800);
+/// Two pause lengths at least this far apart (as a ratio) are different kinds.
+const PAUSE_KIND_RATIO: f64 = 1.6;
+/// Pause lengths this close are a tie (20 ms frames plus energy jitter);
+/// the longest-pause fallback then takes the later one.
+const PAUSE_TIE_MS: usize = 40;
+/// Pauses remembered from earlier chunks of the same dictation.
+const PAUSE_HISTORY: usize = 24;
 /// Hard-cap fallback: cut in the middle of the quietest window this long…
 const QUIET_WINDOW_MS: usize = 100;
 /// …within the last this-many milliseconds before the cap.
@@ -202,42 +215,143 @@ pub fn voiced_ms(pcm: &[u8], sample_rate: u32, threshold: f32) -> usize {
         * FRAME_MS
 }
 
+/// Quiet runs of at least `MIN_PAUSE_MS`, as `(start_frame, frames)`. A run
+/// still open at the end of `rms` is included with its length so far.
+fn pauses(rms: &[f32], threshold: f32) -> Vec<(usize, usize)> {
+    let min = MIN_PAUSE_MS / FRAME_MS;
+    let mut out = Vec::new();
+    let mut start = None;
+    for (index, level) in rms.iter().enumerate() {
+        match (*level < threshold, start) {
+            (true, None) => start = Some(index),
+            (false, Some(begin)) => {
+                if index - begin >= min {
+                    out.push((begin, index - begin));
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(begin) = start.filter(|begin| rms.len() - begin >= min) {
+        out.push((begin, rms.len() - begin));
+    }
+    out
+}
+
+/// Lengths (ms) of the pauses wholly inside `pcm`: a run touching either end
+/// is half of a cut pause and says nothing about the speaker. Feeds the
+/// history `find_cut` adapts to.
+pub fn pause_lengths_ms(pcm: &[u8], sample_rate: u32) -> Vec<usize> {
+    let rms = frame_rms(pcm, sample_rate);
+    pauses(&rms, threshold_from_frames(&rms))
+        .into_iter()
+        .filter(|(start, len)| *start > 0 && start + len < rms.len())
+        .map(|(_, len)| len * FRAME_MS)
+        .collect()
+}
+
+/// How long a pause must be to end a sentence for this speaker, from the
+/// pause lengths seen so far. When the pauses fall into two groups (breath or
+/// comma vs sentence), the threshold sits between them; with one group, a
+/// group of short pauses pushes it above them, a group of long ones leaves the
+/// default. Clamped to `SENTENCE_PAUSE_RANGE_MS`.
+pub fn sentence_pause_ms(seen_ms: &[usize]) -> usize {
+    let mut sorted = seen_ms.to_vec();
+    sorted.sort_unstable();
+    let ratio = |w: &[usize]| w[1] as f64 / w[0].max(1) as f64;
+    let estimate = match sorted
+        .windows(2)
+        .filter(|w| ratio(w) >= PAUSE_KIND_RATIO)
+        .max_by(|a, b| ratio(a).total_cmp(&ratio(b)))
+    {
+        Some(w) => ((w[0] * w[1]) as f64).sqrt() as usize,
+        None => match sorted.get(sorted.len() / 2) {
+            Some(&median) if median < SENTENCE_PAUSE_MS => {
+                ((median as f64 * PAUSE_KIND_RATIO) as usize).max(SENTENCE_PAUSE_MS)
+            }
+            _ => SENTENCE_PAUSE_MS,
+        },
+    };
+    estimate.clamp(SENTENCE_PAUSE_RANGE_MS.0, SENTENCE_PAUSE_RANGE_MS.1)
+}
+
 /// Where to end the next chunk of `pcm` (audio since the last cut), as a byte
-/// offset on a sample boundary, or `None` to keep accumulating.
+/// offset on a sample boundary, or `None` to keep accumulating. `earlier_ms`
+/// are pause lengths from earlier chunks of the same dictation.
 ///
-/// After `MIN_CUT_SECONDS`, the first pause of `SILENCE_RUN_MS` below the
-/// adaptive threshold ends the chunk, cut in the middle of the pause, provided
-/// the chunk holds at least `MIN_VOICED_MS` of voiced audio (a near-silent
-/// chunk is merged into the next one instead). With no usable pause by
-/// `MAX_CUT_SECONDS`, it cuts in the quietest `QUIET_WINDOW_MS` of the last
-/// `QUIET_SEARCH_MS`, so a chunk never exceeds the cap.
-pub fn find_cut(pcm: &[u8], sample_rate: u32) -> Option<usize> {
+/// Chunks are whole sentences: a pause is a quiet run of `MIN_PAUSE_MS`, and
+/// only a sentence pause (`sentence_pause_ms`, adapted to the speaker) is a cut
+/// point; breath and comma pauses never are. After `MIN_CUT_SECONDS`, the
+/// first sentence pause ends the chunk, cut in its middle. With none by
+/// `LONGEST_PAUSE_SECONDS`, it cuts at the longest pause seen so far (the later
+/// one when lengths are within `PAUSE_TIE_MS`), or at the next pause after that. Only speech with no pause at
+/// all reaches `MAX_CUT_SECONDS`, cut in the quietest `QUIET_WINDOW_MS` of the
+/// last `QUIET_SEARCH_MS`. A cut needs `MIN_VOICED_MS` of voiced audio before
+/// it, so a near-silent stretch is merged into the next chunk.
+pub fn find_cut(pcm: &[u8], sample_rate: u32, earlier_ms: &[usize]) -> Option<usize> {
     if sample_rate == 0 {
         return None;
     }
     let frame = frame_bytes(sample_rate);
     let frames = |ms: usize| ms / FRAME_MS;
-    let (min_frame, max_frame) = (
-        frames(MIN_CUT_SECONDS * 1000),
-        frames(MAX_CUT_SECONDS * 1000),
-    );
-    let run_frames = frames(SILENCE_RUN_MS);
-    if pcm.len() / frame < min_frame + run_frames {
+    let min_frame = frames(MIN_CUT_SECONDS * 1000);
+    let longest_frame = frames(LONGEST_PAUSE_SECONDS * 1000);
+    let max_frame = frames(MAX_CUT_SECONDS * 1000);
+    let min_pause = frames(MIN_PAUSE_MS);
+    if pcm.len() / frame < min_frame {
         return None;
     }
     let rms = frame_rms(&pcm[..pcm.len().min(max_frame * frame)], sample_rate);
     let threshold = threshold_from_frames(&rms);
-    let mut voiced = rms[..min_frame].iter().filter(|r| **r >= threshold).count();
-    let mut run = 0;
-    for (index, level) in rms.iter().enumerate().skip(min_frame) {
+    let enough_voice = frames(MIN_VOICED_MS);
+    let skip = earlier_ms.len().saturating_sub(PAUSE_HISTORY);
+    let mut seen: Vec<usize> = earlier_ms[skip..].to_vec();
+    let mut sentence = frames(sentence_pause_ms(&seen));
+    // Closed pauses that could end a chunk: (start, frames, voiced before).
+    let mut candidates: Vec<(usize, usize, usize)> = Vec::new();
+    let mut voiced = 0;
+    let mut run: Option<(usize, usize)> = None; // (start, voiced before)
+    let cut_at = |start: usize, len: usize| start + len / 2;
+    for (index, level) in rms.iter().enumerate() {
+        if index == longest_frame {
+            let open = run.map(|(start, before)| (start, index - start, before));
+            let usable: Vec<(usize, usize, usize)> = candidates
+                .iter()
+                .copied()
+                .chain(open.filter(|(_, len, _)| *len >= min_pause))
+                .filter(|(start, len, before)| {
+                    cut_at(*start, *len) >= min_frame && *before >= enough_voice
+                })
+                .collect();
+            let max_len = usable.iter().map(|(_, len, _)| *len).max().unwrap_or(0);
+            let longest = usable
+                .iter()
+                .rfind(|(_, len, _)| len + frames(PAUSE_TIE_MS) >= max_len);
+            if let Some(&(start, len, _)) = longest {
+                return Some(cut_at(start, len) * frame);
+            }
+        }
         if *level >= threshold {
-            run = 0;
+            if let Some((start, before)) = run.take() {
+                let len = index - start;
+                if len >= min_pause {
+                    seen.push(len * FRAME_MS);
+                    sentence = frames(sentence_pause_ms(
+                        &seen[seen.len().saturating_sub(PAUSE_HISTORY)..],
+                    ));
+                    candidates.push((start, len, before));
+                }
+            }
             voiced += 1;
             continue;
         }
-        run += 1;
-        if run == run_frames && voiced >= frames(MIN_VOICED_MS) {
-            return Some((index + 1 - run_frames + run_frames / 2) * frame);
+        let (start, before) = *run.get_or_insert((index, voiced));
+        let len = index + 1 - start;
+        // A sentence pause, or after the longest-pause deadline any pause.
+        let due = len == sentence || (index >= longest_frame && len == min_pause);
+        if due && cut_at(start, len) >= min_frame && before >= enough_voice {
+            return Some(cut_at(start, len) * frame);
         }
     }
     if rms.len() < max_frame {
@@ -250,14 +364,18 @@ pub fn find_cut(pcm: &[u8], sample_rate: u32) -> Option<usize> {
     Some((quietest + window / 2) * frame)
 }
 
-/// Split a recording at pauses so no piece exceeds `MAX_CUT_SECONDS`
-/// (whole samples only; a trailing odd byte is dropped).
-pub fn split_long(pcm: &[u8], sample_rate: u32) -> Vec<&[u8]> {
+/// Split a recording into whole-sentence pieces of at most `MAX_CUT_SECONDS`
+/// with the same rules as live cutting (whole samples only; a trailing odd byte
+/// is dropped). `earlier_ms` is the dictation's pause history.
+pub fn split_long<'a>(pcm: &'a [u8], sample_rate: u32, earlier_ms: &[usize]) -> Vec<&'a [u8]> {
     let mut rest = &pcm[..pcm.len() - pcm.len() % BYTES_PER_SAMPLE];
     let max_bytes = sample_rate as usize * MAX_CUT_SECONDS * BYTES_PER_SAMPLE;
+    let mut history = earlier_ms.to_vec();
     let mut pieces = Vec::new();
     while max_bytes > 0 && rest.len() > max_bytes {
-        let (head, tail) = rest.split_at(find_cut(rest, sample_rate).unwrap_or(max_bytes));
+        let cut = find_cut(rest, sample_rate, &history).unwrap_or(max_bytes);
+        let (head, tail) = rest.split_at(cut);
+        history.extend(pause_lengths_ms(head, sample_rate));
         pieces.push(head);
         rest = tail;
     }
@@ -598,13 +716,15 @@ impl ChunkQueue {
         self.wake.notify_one();
     }
 
-    /// Queue the remainder per `plan_remainder` and mark the queue finished.
+    /// Queue the remainder per `plan_remainder` (split into whole sentences
+    /// with the dictation's `pauses_ms` history) and mark the queue finished.
     pub fn finish(
         &self,
         remainder: &[u8],
         sample_rate: u32,
         threshold: Option<f32>,
         earlier_chunks: usize,
+        pauses_ms: &[usize],
     ) -> RemainderPlan {
         let mut state = self.state.lock().unwrap();
         let plan = plan_remainder(
@@ -616,7 +736,7 @@ impl ChunkQueue {
         );
         match plan {
             RemainderPlan::Send => state.waiting.extend(
-                split_long(remainder, sample_rate)
+                split_long(remainder, sample_rate, pauses_ms)
                     .into_iter()
                     .map(<[u8]>::to_vec),
             ),
@@ -772,6 +892,8 @@ struct SessionState {
     threshold: Option<f32>,
     /// Chunks handed to the queue while recording.
     chunks: usize,
+    /// Pause lengths (ms) from the chunks cut so far: the speaker's rhythm.
+    pauses: Vec<usize>,
     queue: Option<ChunkQueue>,
     session_id: Option<String>,
     transcription_tx: Option<broadcast::Sender<TranscriptionEvent>>,
@@ -846,7 +968,7 @@ impl BatchClient {
             return;
         }
         let rate = state.sample_rate;
-        while let Some(cut) = find_cut(&state.buffer, rate) {
+        while let Some(cut) = find_cut(&state.buffer, rate, &state.pauses) {
             let chunk: Vec<u8> = state.buffer.drain(..cut).collect();
             let duration = pcm_duration_seconds(&chunk, rate);
             log::info!(
@@ -856,6 +978,9 @@ impl BatchClient {
                 state.cut_seconds + duration
             );
             state.threshold = Some(silence_threshold(&chunk, rate));
+            state.pauses.extend(pause_lengths_ms(&chunk, rate));
+            let skip = state.pauses.len().saturating_sub(PAUSE_HISTORY);
+            state.pauses.drain(..skip);
             state.cut_seconds += duration;
             state.chunks += 1;
             let Some(queue) = self.queue(&mut state) else {
@@ -892,12 +1017,12 @@ impl BatchClient {
             let _ = tx.send(TranscriptionEvent::SessionEnded);
             return;
         }
-        let (threshold, earlier) = (state.threshold, state.chunks);
+        let (threshold, earlier, pauses) = (state.threshold, state.chunks, state.pauses.clone());
         let recorded = state.cut_seconds + remainder_seconds;
         let Some(queue) = self.queue(&mut state) else {
             return;
         };
-        let plan = queue.finish(&remainder, rate, threshold, earlier);
+        let plan = queue.finish(&remainder, rate, threshold, earlier, &pauses);
         log::info!(
             "[batch-stt] released after {recorded:.1}s with {} at {}: {earlier} chunk(s) already queued, {remainder_seconds:.1}s remainder -> {plan:?}",
             settings.model,
@@ -1020,140 +1145,251 @@ mod tests {
         bytes as f64 / (rate as f64 * 2.0)
     }
 
-    #[test]
-    fn no_cut_before_ten_seconds_even_with_pauses() {
-        let pcm = concat(&[
-            speech(4.0, RATE),
-            quiet(1.0, RATE),
-            speech(4.0, RATE),
-            quiet(1.2, RATE),
-        ]);
-        assert_eq!(find_cut(&pcm, RATE), None);
-        assert_eq!(find_cut(&[], RATE), None);
-        assert_eq!(find_cut(&pcm, 0), None);
+    /// Speech with gaps: `(speech_s, gap_s)` pairs, gaps as near-silence.
+    fn spoken(parts: &[(f64, f64)], rate: u32) -> Vec<u8> {
+        parts
+            .iter()
+            .flat_map(|(talk, gap)| [speech(*talk, rate), quiet(*gap, rate)])
+            .collect::<Vec<_>>()
+            .concat()
+    }
+
+    fn cut_seconds(pcm: &[u8], earlier: &[usize]) -> Option<f64> {
+        find_cut(pcm, RATE, earlier).map(|cut| {
+            assert_eq!(cut % 2, 0, "cut on a sample boundary");
+            at_seconds(cut, RATE)
+        })
     }
 
     #[test]
-    fn cuts_in_the_middle_of_the_first_pause_after_ten_seconds() {
-        // The 6.0–6.5 s pause is too early; the 11.5–12.1 s one is the cut.
-        let pcm = concat(&[
-            speech(6.0, RATE),
-            quiet(0.5, RATE),
-            speech(5.0, RATE),
-            quiet(0.6, RATE),
-            speech(3.0, RATE),
-        ]);
-        let cut = find_cut(&pcm, RATE).expect("cut");
-        assert_eq!(cut % 2, 0);
-        let at = at_seconds(cut, RATE);
-        assert!((11.6..11.7).contains(&at), "cut at {at}");
+    fn no_cut_before_six_seconds_even_at_sentence_pauses() {
+        let pcm = spoken(&[(2.5, 1.0), (2.0, 0.39)], RATE);
+        assert_eq!(cut_seconds(&pcm, &[]), None);
+        assert_eq!(find_cut(&[], RATE, &[]), None);
+        assert_eq!(find_cut(&pcm, 0, &[]), None);
     }
 
     #[test]
-    fn short_gaps_between_words_are_not_pauses() {
-        let pcm = concat(&[
-            speech(10.5, RATE),
-            quiet(0.2, RATE),
-            speech(3.0, RATE),
-            quiet(0.4, RATE),
-            speech(1.0, RATE),
-        ]);
-        let at = at_seconds(find_cut(&pcm, RATE).expect("cut"), RATE);
-        assert!((13.7..13.9).contains(&at), "cut at {at}");
+    fn sentence_pause_threshold_adapts_to_the_speaker_within_a_range() {
+        for (case, seen, expected) in [
+            ("nothing seen yet", vec![], 500),
+            ("comma 250 vs sentence 700", vec![250, 700, 260, 240], 426),
+            ("slow speaker 550 vs 1200", vec![550, 1_200, 560], 800),
+            ("fast speaker 200 vs 420", vec![200, 420, 180], 400),
+            ("only commas push it up", vec![300, 320, 340], 512),
+            ("only sentence pauses keep the default", vec![700, 720], 500),
+            ("very long pauses clamp to 800", vec![300, 3_000], 800),
+        ] {
+            assert_eq!(sentence_pause_ms(&seen), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn cuts_in_the_middle_of_the_first_sentence_pause_after_six_seconds() {
+        // 0.7 s pause at 3.0 s is too early; the 0.25 s comma at 7.7 s is not a
+        // cut point; the 0.7 s pause at 9.95 s is.
+        let pcm = spoken(&[(3.0, 0.7), (4.0, 0.25), (2.0, 0.7), (3.0, 0.0)], RATE);
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((10.1..10.25).contains(&at), "cut at {at}");
+    }
+
+    #[test]
+    fn never_cuts_at_a_short_gap_when_a_long_one_is_in_the_window() {
+        // Commas every ~1.5 s from 6 s on, one sentence end at 13 s.
+        let pcm = spoken(
+            &[
+                (6.2, 0.25),
+                (1.5, 0.25),
+                (1.5, 0.25),
+                (1.5, 0.25),
+                (1.0, 0.7),
+                (3.0, 0.25),
+                (1.0, 0.0),
+            ],
+            RATE,
+        );
+        let sentence_end = 6.2 + 0.25 + (1.5 + 0.25) * 3.0 + 1.0;
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!(
+            (sentence_end..sentence_end + 0.7).contains(&at),
+            "cut at {at}, sentence ends at {sentence_end}"
+        );
+    }
+
+    #[test]
+    fn slow_speakers_long_commas_are_not_sentence_ends() {
+        // Commas of 0.55 s would pass a fixed 0.5 s rule; this speaker's
+        // sentence pauses are 1.2 s, so only those cut.
+        let pcm = spoken(
+            &[(1.5, 0.55), (1.5, 1.2), (3.0, 0.55), (2.0, 1.2), (1.0, 0.0)],
+            RATE,
+        );
+        let comma = 1.5 + 0.55 + 1.5 + 1.2 + 3.0;
+        let sentence_end = comma + 0.55 + 2.0;
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!(at > comma + 0.55, "cut at the comma: {at}");
+        assert!(
+            (sentence_end..sentence_end + 1.2).contains(&at),
+            "cut at {at}"
+        );
+    }
+
+    #[test]
+    fn fast_speakers_short_sentence_pauses_still_cut() {
+        // 0.42 s sentence pauses would miss a fixed 0.5 s rule.
+        let pcm = spoken(
+            &[(2.0, 0.2), (2.0, 0.42), (2.5, 0.2), (1.0, 0.42), (1.0, 0.0)],
+            RATE,
+        );
+        let sentence_end = 2.0 + 0.2 + 2.0 + 0.42 + 2.5 + 0.2 + 1.0;
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!(
+            (sentence_end..sentence_end + 0.42).contains(&at),
+            "cut at {at}"
+        );
+    }
+
+    #[test]
+    fn earlier_chunks_teach_the_speakers_rhythm() {
+        // Alone, a 0.6 s pause is a sentence end; after hearing 0.45 s commas
+        // and 1.4 s sentence ends, it is not.
+        let pcm = spoken(&[(6.5, 0.6), (2.0, 1.4), (1.0, 0.0)], RATE);
+        let alone = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((6.5..7.1).contains(&alone), "cut at {alone}");
+        let learned = cut_seconds(&pcm, &[450, 1_400, 460, 1_380]).expect("cut");
+        assert!((9.1..10.5).contains(&learned), "cut at {learned}");
+    }
+
+    #[test]
+    fn without_a_sentence_pause_by_15s_cuts_at_the_longest_pause() {
+        let pcm = spoken(
+            &[
+                (6.5, 0.25),
+                (2.0, 0.36),
+                (2.0, 0.25),
+                (2.0, 0.26),
+                (3.0, 0.0),
+            ],
+            RATE,
+        );
+        let longest = 6.5 + 0.25 + 2.0;
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((longest..longest + 0.36).contains(&at), "cut at {at}");
+        // Before 15 s nothing is decided.
+        let early = &pcm[..(14.9 * RATE as f64) as usize * 2];
+        assert_eq!(cut_seconds(early, &[]), None);
+    }
+
+    #[test]
+    fn equal_pauses_prefer_the_later_one() {
+        let pcm = spoken(&[(7.0, 0.3), (3.0, 0.3), (3.0, 0.2), (3.0, 0.0)], RATE);
+        let later = 7.0 + 0.3 + 3.0;
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((later..later + 0.3).contains(&at), "cut at {at}");
+    }
+
+    #[test]
+    fn pauses_within_40ms_are_a_tie_and_the_later_one_wins() {
+        // A 440 ms comma, then a 420 ms sentence end: one frame apart is noise.
+        let pcm = spoken(&[(6.5, 0.44), (2.0, 0.42), (2.0, 0.3), (6.0, 0.0)], RATE);
+        let later = 6.5 + 0.44 + 2.0;
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((later..later + 0.42).contains(&at), "cut at {at}");
+        // 80 ms shorter is a real difference: the longer, earlier pause wins.
+        let pcm = spoken(&[(6.5, 0.44), (2.0, 0.36), (2.0, 0.3), (6.0, 0.0)], RATE);
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((6.5..6.94).contains(&at), "cut at {at}");
+    }
+
+    #[test]
+    fn after_15s_the_next_pause_of_any_kind_cuts() {
+        let pcm = spoken(&[(16.0, 0.2), (3.0, 0.0)], RATE);
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((16.0..16.2).contains(&at), "cut at {at}");
     }
 
     #[test]
     fn pause_detection_adapts_to_background_noise() {
-        // Noise at ~-40 dBFS is well above the absolute floor but far below speech.
-        let pcm = concat(&[
-            speech(11.0, RATE),
-            noise(0.5, 0.02, RATE),
-            speech(2.0, RATE),
-        ]);
-        let at = at_seconds(find_cut(&pcm, RATE).expect("cut"), RATE);
-        assert!((11.1..11.2).contains(&at), "cut at {at}");
+        // Noise at ~-40 dBFS is above the absolute floor but far below speech.
+        let pcm = concat(&[speech(7.0, RATE), noise(0.7, 0.02, RATE), speech(2.0, RATE)]);
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((7.2..7.35).contains(&at), "cut at {at}");
     }
 
     #[test]
-    fn waits_for_the_pause_to_last_300ms() {
-        let pcm = concat(&[speech(11.0, RATE), quiet(0.25, RATE)]);
-        assert_eq!(find_cut(&pcm, RATE), None);
-        let pcm = concat(&[speech(11.0, RATE), quiet(0.32, RATE)]);
-        assert!(find_cut(&pcm, RATE).is_some());
-    }
-
-    #[test]
-    fn hard_cap_cuts_at_the_quietest_window_of_the_last_two_seconds() {
-        // No 300 ms pause anywhere; a quieter dip at 15 s is outside the search
-        // window, the 100 ms dip at 19.0 s is inside it.
+    fn hard_cap_only_for_speech_with_no_pauses_at_all() {
+        // No pause anywhere; a dip at 20 s is outside the last-2 s window, the
+        // 100 ms dip at 24.0 s is inside it.
         let pcm = concat(&[
-            speech(15.0, RATE),
-            quiet(0.15, RATE),
-            speech(3.85, RATE),
+            speech(20.0, RATE),
+            tone(0.1, 0.01, RATE),
+            speech(3.9, RATE),
             tone(0.1, 0.02, RATE),
             speech(2.0, RATE),
         ]);
-        let short = &pcm[..(19.9 * RATE as f64) as usize * 2];
-        assert_eq!(find_cut(short, RATE), None);
-        let at = at_seconds(find_cut(&pcm, RATE).expect("cut"), RATE);
-        assert!((19.0..19.1).contains(&at), "cut at {at}");
-    }
-
-    #[test]
-    fn continuous_speech_is_cut_by_the_hard_cap_at_most() {
-        let pcm = speech(25.0, RATE);
-        let at = at_seconds(find_cut(&pcm, RATE).expect("cut"), RATE);
-        assert!((18.0..=20.0).contains(&at), "cut at {at}");
+        let short = &pcm[..(24.9 * RATE as f64) as usize * 2];
+        assert_eq!(cut_seconds(short, &[]), None);
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((24.0..24.1).contains(&at), "cut at {at}");
+        let at = cut_seconds(&speech(30.0, RATE), &[]).expect("cut");
+        assert!((23.0..=25.0).contains(&at), "cut at {at}");
     }
 
     #[test]
     fn a_near_silent_chunk_is_merged_into_the_next_one() {
         // 0.5 s of speech then a long pause: not enough voiced audio to send
-        // alone, so the cut waits for the pause after the next sentence.
-        let pcm = concat(&[
-            speech(0.5, RATE),
-            quiet(11.0, RATE),
-            speech(4.0, RATE),
-            quiet(0.5, RATE),
-            speech(1.0, RATE),
-        ]);
-        let at = at_seconds(find_cut(&pcm, RATE).expect("cut"), RATE);
-        assert!((15.6..15.7).contains(&at), "cut at {at}");
+        // alone, so the cut waits for the next sentence end.
+        let pcm = spoken(&[(0.5, 8.0), (3.0, 0.7), (1.0, 0.0)], RATE);
+        let at = cut_seconds(&pcm, &[]).expect("cut");
+        assert!((11.5..12.2).contains(&at), "cut at {at}");
     }
 
     #[test]
     fn cuts_land_on_sample_boundaries_at_other_capture_rates() {
         for rate in [44_100, 48_000] {
-            let pcm = concat(&[speech(10.5, rate), quiet(0.6, rate), speech(1.0, rate)]);
-            let cut = find_cut(&pcm, rate).expect("cut");
+            let pcm = spoken(&[(6.5, 0.7), (1.0, 0.0)], rate);
+            let cut = find_cut(&pcm, rate, &[]).expect("cut");
             assert_eq!(cut % 2, 0);
             let at = at_seconds(cut, rate);
-            assert!((10.6..10.7).contains(&at), "rate {rate}: cut at {at}");
+            assert!((6.7..6.8).contains(&at), "rate {rate}: cut at {at}");
         }
     }
 
     #[test]
+    fn pause_lengths_skip_runs_that_touch_the_edges() {
+        let pcm = concat(&[
+            quiet(0.3, RATE),
+            spoken(&[(1.0, 0.25), (1.0, 0.7), (1.0, 0.1), (1.0, 0.4)], RATE),
+        ]);
+        let lengths = pause_lengths_ms(&pcm, RATE);
+        assert_eq!(lengths.len(), 2, "{lengths:?}");
+        assert!(
+            (240..=260).contains(&lengths[0]) && (680..=720).contains(&lengths[1]),
+            "{lengths:?}"
+        );
+    }
+
+    #[test]
     fn split_long_keeps_short_recordings_whole() {
-        assert!(split_long(&[], RATE).is_empty());
-        assert!(split_long(&[7], RATE).is_empty());
-        let pcm = concat(&[speech(19.0, RATE), vec![1]]);
-        let pieces = split_long(&pcm, RATE);
+        assert!(split_long(&[], RATE, &[]).is_empty());
+        assert!(split_long(&[7], RATE, &[]).is_empty());
+        let pcm = concat(&[speech(24.0, RATE), vec![1]]);
+        let pieces = split_long(&pcm, RATE, &[]);
         assert_eq!(pieces.len(), 1);
         assert_eq!(pieces[0].len(), pcm.len() - 1);
     }
 
     #[test]
-    fn split_long_cuts_at_pauses_within_the_cap() {
+    fn split_long_cuts_at_sentence_ends_within_the_cap() {
         let pcm = concat(&[
-            speech(14.0, RATE),
-            quiet(0.5, RATE),
+            spoken(&[(4.0, 0.25), (4.0, 0.7), (5.0, 0.25), (3.0, 0.7)], RATE),
             speech(30.0, RATE),
             vec![9],
         ]);
-        let pieces = split_long(&pcm, RATE);
+        let pieces = split_long(&pcm, RATE, &[]);
         assert!(pieces.len() >= 3, "{} pieces", pieces.len());
         let first = at_seconds(pieces[0].len(), RATE);
-        assert!((14.1..14.2).contains(&first), "first piece {first}");
+        assert!((8.25..8.95).contains(&first), "first piece {first}");
         assert!(pieces.iter().all(|p| p.len() % 2 == 0));
         assert!(pieces
             .iter()
@@ -1505,7 +1741,10 @@ mod tests {
         for len in [3_200, 6_400, 9_600] {
             queue.push(vec![0; len]);
         }
-        assert_eq!(queue.finish(&[], RATE, None, 3), RemainderPlan::Nothing);
+        assert_eq!(
+            queue.finish(&[], RATE, None, 3, &[]),
+            RemainderPlan::Nothing
+        );
         let events = events(&mut rx).await;
         assert_eq!(final_text(&events).as_deref(), Some("c1 c2 c3"));
         assert!(matches!(
@@ -1534,7 +1773,7 @@ mod tests {
         let tail = quiet(0.5, RATE);
         let threshold = Some(silence_threshold(&second, RATE));
         assert_eq!(
-            queue.finish(&tail, RATE, threshold, 2),
+            queue.finish(&tail, RATE, threshold, 2, &[]),
             RemainderPlan::MergeIntoQueued
         );
         gate.add_permits(10);
@@ -1561,7 +1800,7 @@ mod tests {
         for _ in 0..3 {
             queue.push(vec![0; 3_200]);
         }
-        queue.finish(&[], RATE, None, 3);
+        queue.finish(&[], RATE, None, 3, &[]);
         let events = events(&mut rx).await;
         assert!(
             matches!(&events[..], [TranscriptionEvent::Error(m), TranscriptionEvent::SessionEnded] if m == "model crashed"),
@@ -1576,7 +1815,7 @@ mod tests {
         let (tx, mut rx) = broadcast::channel(16);
         let queue = ChunkQueue::spawn(fake(&probe, None, |_| Ok("  ".to_string())), RATE, tx);
         queue.push(vec![0; 3_200]);
-        queue.finish(&[], RATE, None, 1);
+        queue.finish(&[], RATE, None, 1, &[]);
         let events = events(&mut rx).await;
         assert!(
             matches!(&events[..], [TranscriptionEvent::Error(m), TranscriptionEvent::SessionEnded] if m.contains("No speech")),
@@ -1593,7 +1832,7 @@ mod tests {
         queue.push(vec![0; 3_200]);
         queue.push(vec![0; 3_200]);
         probe.wait_for_calls(1).await;
-        queue.finish(&speech(2.0, RATE), RATE, None, 2);
+        queue.finish(&speech(2.0, RATE), RATE, None, 2, &[]);
         drop(queue); // Esc / error / too-short: cancel
         gate.add_permits(10); // the in-flight request "returns" late
         tokio::time::sleep(Duration::from_millis(60)).await;
@@ -1608,15 +1847,7 @@ mod tests {
         client.set_audio_format(RATE);
         client.init_session(settings(None), RequestOptions::default());
         let mut rx = client.subscribe_to_transcriptions();
-        feed(
-            &client,
-            &concat(&[
-                speech(6.0, RATE),
-                quiet(0.5, RATE),
-                speech(5.0, RATE),
-                quiet(0.6, RATE),
-            ]),
-        );
+        feed(&client, &spoken(&[(4.0, 0.25), (3.0, 0.7)], RATE));
         // Chunk 1 goes out while the key is still held.
         probe.wait_for_calls(1).await;
         feed(&client, &concat(&[speech(4.0, RATE), quiet(0.2, RATE)]));
@@ -1626,10 +1857,13 @@ mod tests {
         let lengths = probe.lengths();
         assert_eq!(lengths.len(), 2);
         let first = at_seconds(lengths[0], RATE);
-        assert!((11.6..11.7).contains(&first), "first chunk {first}s");
+        assert!(
+            (7.45..7.55).contains(&first),
+            "first chunk ends mid sentence pause: {first}s"
+        );
         let total = at_seconds(lengths.iter().sum(), RATE);
         assert!(
-            (16.29..16.31).contains(&total),
+            (12.14..12.16).contains(&total),
             "all audio sent once: {total}s"
         );
     }
@@ -1765,6 +1999,118 @@ mod tests {
         }
     }
 
+    /// Sample rate and PCM data of a 16-bit mono WAV. Walks the RIFF chunks:
+    /// `say`/`afconvert` write JUNK/FLLR chunks around fmt/data.
+    fn wav_pcm(wav: &[u8]) -> (u32, &[u8]) {
+        let (mut at, mut sample_rate) = (12, 0u32);
+        while at + 8 <= wav.len() {
+            let len = u32::from_le_bytes(wav[at + 4..at + 8].try_into().unwrap()) as usize;
+            match &wav[at..at + 4] {
+                b"fmt " => {
+                    sample_rate = u32::from_le_bytes(wav[at + 12..at + 16].try_into().unwrap())
+                }
+                b"data" if sample_rate > 0 => {
+                    let end = (at + 8 + len).min(wav.len());
+                    return (sample_rate, &wav[at + 8..end]);
+                }
+                _ => {}
+            }
+            at += 8 + len + len % 2;
+        }
+        panic!("not a PCM WAV");
+    }
+
+    /// Realistic check with macOS `say`: comma pauses (`[[slnc 250]]`) and
+    /// sentence ends (`[[slnc 700]]`) through the live path (100 ms pieces into
+    /// `BatchClient`). Every cut must land in a sentence-end pause. Skips where
+    /// `say`/`afconvert` are unavailable.
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn say_dictation_is_cut_only_at_sentence_ends() {
+        const SENTENCES: [&str; 6] = [
+            "Okay team, [[slnc 250]] here is the plan for this week.",
+            "First, [[slnc 250]] we finish the incident review and share the timeline with everyone involved.",
+            "Second, [[slnc 250]] the QA team publishes the automation coverage numbers, [[slnc 250]] broken down by product.",
+            "Third, [[slnc 250]] the data team agrees the scope for the real time dashboards.",
+            "Finally, [[slnc 250]] security runs the phishing simulation on the twentieth.",
+            "Thanks everyone.",
+        ];
+        let dir = std::env::temp_dir().join(format!("ttm-say-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (aiff, wav) = (dir.join("say.aiff"), dir.join("say.wav"));
+        let text = SENTENCES.join(" [[slnc 700]] ");
+        let made = std::process::Command::new("say")
+            .arg("-o")
+            .arg(&aiff)
+            .arg(&text)
+            .status()
+            .is_ok_and(|s| s.success())
+            && std::process::Command::new("afconvert")
+                .args(["-f", "WAVE", "-d", "LEI16@16000", "-c", "1"])
+                .arg(&aiff)
+                .arg(&wav)
+                .status()
+                .is_ok_and(|s| s.success());
+        if !made {
+            println!("skipped: `say`/`afconvert` unavailable");
+            return;
+        }
+        let bytes = std::fs::read(&wav).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let (rate, pcm) = wav_pcm(&bytes);
+
+        // Oracle: sentence ends are the long pauses of the whole clip.
+        let rms = frame_rms(pcm, rate);
+        let all = pauses(&rms, threshold_from_frames(&rms));
+        let sentence_ends: Vec<(f64, f64)> = all
+            .iter()
+            .filter(|(_, len)| len * FRAME_MS >= 600)
+            .map(|(start, len)| {
+                let (a, b) = (*start as f64 * 0.02, (start + len) as f64 * 0.02);
+                (a, b)
+            })
+            .collect();
+        assert_eq!(sentence_ends.len(), SENTENCES.len() - 1, "pauses: {all:?}");
+
+        let probe = Probe::default();
+        let client = BatchClient::with_transcriber(fake(&probe, None, numbered));
+        client.set_audio_format(rate);
+        client.init_session(settings(None), RequestOptions::default());
+        let mut rx = client.subscribe_to_transcriptions();
+        for piece in pcm.chunks(rate as usize * 2 / 10) {
+            client.send_audio(piece);
+            // Let the queue work as it would while the user talks.
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        client.stop_recording();
+        events(&mut rx).await;
+
+        let mut at = 0.0;
+        let lengths = probe.lengths();
+        for (index, len) in lengths.iter().enumerate() {
+            let start = at;
+            at += at_seconds(*len, rate);
+            let done = sentence_ends
+                .iter()
+                .filter(|(start, _)| *start <= at)
+                .count();
+            let last = index + 1 == lengths.len();
+            println!(
+                "chunk {} [{start:6.2}s - {at:6.2}s] ends after sentence {}{}",
+                index + 1,
+                if last { SENTENCES.len() } else { done },
+                if last { " (release)" } else { "" }
+            );
+            if !last {
+                assert!(
+                    sentence_ends.iter().any(|(a, b)| (*a..*b).contains(&at)),
+                    "cut at {at:.2}s is not in a sentence-end pause {sentence_ends:?}"
+                );
+            }
+        }
+        assert!(lengths.len() >= 3, "expected cuts in a {at:.1}s clip");
+    }
+
     /// Real end-to-end check of incremental transcription against a local
     /// Ollama: feeds a WAV in real time (100 ms pieces), so chunks are cut and
     /// transcribed while "recording", then releases and waits for the text.
@@ -1774,24 +2120,7 @@ mod tests {
     async fn ollama_transcribes_a_real_wav() {
         let path = std::env::var("TTM_STT_WAV").expect("set TTM_STT_WAV to a 16-bit mono WAV");
         let wav = std::fs::read(&path).unwrap();
-        // Walk the RIFF chunks: `say` writes JUNK/FLLR chunks around fmt/data.
-        let (mut at, mut sample_rate, mut data_at) = (12, 0u32, 0);
-        while at + 8 <= wav.len() {
-            let len = u32::from_le_bytes(wav[at + 4..at + 8].try_into().unwrap()) as usize;
-            match &wav[at..at + 4] {
-                b"fmt " => {
-                    sample_rate = u32::from_le_bytes(wav[at + 12..at + 16].try_into().unwrap())
-                }
-                b"data" => {
-                    data_at = at + 8;
-                    break;
-                }
-                _ => {}
-            }
-            at += 8 + len + len % 2;
-        }
-        assert!(sample_rate > 0 && data_at > 0, "not a PCM WAV");
-        let pcm = &wav[data_at..];
+        let (sample_rate, pcm) = wav_pcm(&wav);
         let settings = BatchSettings {
             base_url: std::env::var("TTM_STT_BASE_URL")
                 .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),

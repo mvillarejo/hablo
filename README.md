@@ -80,7 +80,7 @@ The pill never takes focus or brings TTM to the front, so the paste still lands 
 
 ## Incremental transcription
 
-With an OpenAI-compatible profile (local Ollama by default), TTM transcribes while you speak. Once about 10 seconds of audio have built up, it cuts at the next natural pause and sends that chunk in the background while you keep talking. If you don't pause within 20 seconds, it cuts at the quietest moment of the last two seconds. Chunks go out one at a time, so a laptop running the model locally never runs two transcriptions in parallel. When you release the key, only the last few seconds are left to send. TTM joins the chunk texts in order and pastes them once, as before.
+With an OpenAI-compatible profile (local Ollama by default), TTM transcribes while you speak, one or two sentences at a time, so the model always gets complete phrases. It tells a short pause (a breath or a comma) apart from the longer pause at the end of a sentence, and it adjusts to your own rhythm as you talk, so fast and slow speakers both work. Once a chunk holds at least 6 seconds of audio, TTM ends it at the next sentence pause and sends it in the background while you keep talking. If no sentence pause comes within 15 seconds, it cuts at the longest pause so far. Only speech with no pauses at all is cut at 25 seconds. Chunks go out one at a time, so a laptop running the model locally never runs two transcriptions in parallel. When you release the key, only the last few seconds are left to send. TTM joins the chunk texts in order and pastes them once, as before.
 
 If you press Esc, cancel, or hit an error, TTM discards every pending chunk and any late result. A partial transcript is never pasted.
 
@@ -152,7 +152,7 @@ Global hotkey → microphone capture ─┬→ Gladia WebSocket (live)
 Focused app ← clipboard-safe paste ← transcript cleanup
 ```
 
-1. The global hotkey starts microphone capture and opens a Gladia live session. The OpenAI-compatible provider instead cuts the audio at pauses and transcribes each chunk in the background, one request at a time (see [Incremental transcription](#incremental-transcription)).
+1. The global hotkey starts microphone capture and opens a Gladia live session. The OpenAI-compatible provider instead cuts the audio at sentence ends and transcribes each chunk in the background, one request at a time (see [Incremental transcription](#incremental-transcription)).
 2. With Gladia, PCM audio is sent in chunks while partial and final transcription events stream back.
 3. Final utterances pass through `UtteranceCleaner`, which handles punctuation, capitalization, and duplicates.
 4. Clean incremental text is pasted into the focused app without permanently replacing the clipboard.
