@@ -31,7 +31,6 @@ export function AppSettingsView({
   defaultHotkey,
   isMac,
   permissions,
-  region,
   version,
   onDone,
   onOpenLogs,
@@ -62,7 +61,6 @@ export function AppSettingsView({
   defaultHotkey: string;
   isMac: boolean;
   permissions: { hotkeyError: string | null };
-  region: string;
   version: string;
   onDone: () => void;
   onOpenLogs: () => void;
@@ -73,8 +71,6 @@ export function AppSettingsView({
         {formatKeySymbol(key)}
       </kbd>
     ));
-
-  const regionLabel = region || null;
 
   const currentHotkeyParts = parseHotkeyParts(settings.hotkey);
   const defaultDevice = audioDevices.find((device) => device.isDefault);
@@ -88,8 +84,7 @@ export function AppSettingsView({
     <SettingsPageLayout
       title="App settings"
       footer={
-        <p className="settings-region-footer">
-          {regionLabel ? `Region: ${regionLabel} · ` : ""}
+        <p className="settings-version-footer">
           {version ? `v${version}` : ""}
         </p>
       }

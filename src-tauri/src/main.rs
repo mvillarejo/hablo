@@ -1052,11 +1052,6 @@ fn send_paste_keystroke() -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-fn get_region(state: State<'_, AppState>) -> String {
-    state.region.to_string()
-}
-
 /// Reveal the folder containing the rolling log file (e.g.
 /// `~/Library/Logs/in.villarejo.ttm/` on macOS) so the user can attach or share it.
 #[tauri::command]
@@ -1495,7 +1490,6 @@ fn main() {
             stop_dictation,
             get_recording_state,
             set_recording_state,
-            get_region,
             open_log_folder,
             get_platform,
             show_window,

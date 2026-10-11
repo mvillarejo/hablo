@@ -173,7 +173,6 @@ export default function App() {
   });
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
   const [platform, setPlatform] = useState<string>("macos");
-  const [region, setRegion] = useState<string>("");
   const [appVersion, setAppVersion] = useState<string>("");
   const [languageDropdownOpen, setLanguageDropdownOpen] = useState(false);
   const [activationDropdownOpen, setActivationDropdownOpen] = useState(false);
@@ -515,9 +514,6 @@ export default function App() {
     const init = async () => {
       const p = await invoke<string>("get_platform").catch(() => "macos");
       setPlatform(p);
-
-      const r = await invoke<string>("get_region").catch(() => "");
-      setRegion(r);
 
       const v = await getVersion().catch(() => "");
       setAppVersion(v);
@@ -1952,7 +1948,6 @@ export default function App() {
               defaultHotkey={DEFAULT_HOTKEY}
               isMac={isMac}
               permissions={permissions}
-              region={region}
               version={appVersion}
               onDone={() => setNavScreen("home")}
               onOpenLogs={() => invoke("open_log_folder").catch(console.error)}

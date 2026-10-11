@@ -493,7 +493,6 @@ export function ScreenshotGallery() {
             defaultHotkey="Fn"
             isMac
             permissions={{ hotkeyError: null }}
-            region="EU"
             version="0.1.0"
             onDone={noop}
             onOpenLogs={noop}
