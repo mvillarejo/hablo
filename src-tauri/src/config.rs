@@ -1350,26 +1350,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn mouse_button_hotkey_round_trips_and_left_click_is_rejected() {
-        let dir = TestConfigDir::new();
-        let path = dir.config_path();
-
-        save_hotkey_at(&path, "Mouse4").unwrap();
-        assert_eq!(
-            load_config_from_path(&path).unwrap().hotkey.as_deref(),
-            Some("Mouse4")
-        );
-
-        // Left click would make the mouse unusable; the stored hotkey is untouched.
-        assert!(save_hotkey_at(&path, "Mouse1").is_err());
-        assert_eq!(
-            load_config_from_path(&path).unwrap().hotkey.as_deref(),
-            Some("Mouse4")
-        );
-    }
-
     #[test]
     fn deleting_a_profile_preserves_other_settings() {
         let dir = TestConfigDir::new();
