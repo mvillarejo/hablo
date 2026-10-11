@@ -219,6 +219,10 @@ async fn init_gladia_session(
         .or_else(|| config::get_custom_vocabulary().ok())
         .unwrap_or_default();
     let params = SessionParams::for_profile(&profile, languages, custom_vocabulary, state.region);
+    if let Some(batch) = &params.batch {
+        // Local Ollama only: load the model while the user is still speaking.
+        batch_stt::warm_up_ollama(batch);
+    }
     log::info!(
         "initialising transcription session (profile={}, provider={:?}, region={}, sample_rate={}, code_switching={})",
         profile.id,

@@ -471,6 +471,86 @@ pub fn http_transcriber(
     })
 }
 
+/// Keep a warmed-up model loaded this long.
+const WARMUP_KEEP_ALIVE: &str = "5m";
+/// At most one warm-up per this interval.
+const WARMUP_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Origin (`http://host:port`) of `base_url` when it points at Ollama: a
+/// loopback host (localhost, 127.0.0.1, ::1) or Ollama's port 11434. `None`
+/// for anything else, so cloud providers that bill per request never get one.
+pub fn ollama_origin(base_url: &str) -> Option<String> {
+    let url = url::Url::parse(trim_base_url(base_url)).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let loopback = match url.host()? {
+        url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost"),
+        url::Host::Ipv4(ip) => ip == std::net::Ipv4Addr::LOCALHOST,
+        url::Host::Ipv6(ip) => ip == std::net::Ipv6Addr::LOCALHOST,
+    };
+    (loopback || url.port() == Some(11434)).then(|| url.origin().ascii_serialization())
+}
+
+/// Ollama's documented "load a model" call: `POST /api/generate` with no prompt.
+pub fn warmup_request(
+    client: &reqwest::Client,
+    origin: &str,
+    model: &str,
+) -> reqwest::RequestBuilder {
+    client
+        .post(format!("{origin}/api/generate"))
+        .json(&serde_json::json!({ "model": model, "keep_alive": WARMUP_KEEP_ALIVE }))
+}
+
+/// Rate limit for warm-ups.
+pub struct WarmupGate(Mutex<Option<Instant>>);
+
+impl WarmupGate {
+    pub const fn new() -> Self {
+        Self(Mutex::new(None))
+    }
+
+    /// True (and records `now`) when no warm-up fired in the last `WARMUP_INTERVAL`.
+    pub fn try_acquire(&self, now: Instant) -> bool {
+        let mut last = self.0.lock().unwrap();
+        if last.is_some_and(|last| now.saturating_duration_since(last) < WARMUP_INTERVAL) {
+            return false;
+        }
+        *last = Some(now);
+        true
+    }
+}
+
+static WARMUP_GATE: WarmupGate = WarmupGate::new();
+
+/// Fire-and-forget model load on a local Ollama, so the model is warm by the
+/// time the first chunk arrives. Never blocks and never fails dictation.
+/// Returns whether a request was fired.
+pub fn warm_up_ollama(settings: &BatchSettings) -> bool {
+    let Some(origin) = ollama_origin(&settings.base_url) else {
+        return false;
+    };
+    if !WARMUP_GATE.try_acquire(Instant::now()) {
+        log::debug!("[batch-stt] warm-up skipped: one fired in the last 30s");
+        return false;
+    }
+    let request = warmup_request(&http_client(), &origin, &settings.model);
+    let model = settings.model.clone();
+    tokio::spawn(async move {
+        let started = Instant::now();
+        match request.send().await {
+            Ok(response) if response.status().is_success() => log::info!(
+                "[batch-stt] warm-up: {model} ready in {}ms",
+                started.elapsed().as_millis()
+            ),
+            Ok(response) => log::info!("[batch-stt] warm-up: {} for {model}", response.status()),
+            Err(error) => log::info!("[batch-stt] warm-up failed for {model}: {error}"),
+        }
+    });
+    true
+}
+
 #[derive(Default)]
 struct QueueState {
     /// Chunks not yet picked up by the worker, oldest first.
@@ -1610,6 +1690,81 @@ mod tests {
         }
     }
 
+    // --- Ollama warm-up ---
+
+    #[test]
+    fn ollama_is_detected_by_loopback_host_or_port() {
+        for (url, expected) in [
+            ("http://localhost:11434/v1", Some("http://localhost:11434")),
+            ("http://LOCALHOST:8080/v1/", Some("http://localhost:8080")),
+            ("http://127.0.0.1:11434/v1", Some("http://127.0.0.1:11434")),
+            ("http://[::1]:11434/v1", Some("http://[::1]:11434")),
+            (
+                "http://192.168.1.20:11434/v1",
+                Some("http://192.168.1.20:11434"),
+            ),
+            ("https://api.groq.com/openai/v1", None),
+            ("https://api.openai.com/v1", None),
+            ("http://127.0.0.2:8000/v1", None),
+            ("http://localhost.evil.example/v1", None),
+            ("ftp://localhost/v1", None),
+            ("not a url", None),
+        ] {
+            assert_eq!(ollama_origin(url).as_deref(), expected, "{url}");
+        }
+    }
+
+    #[test]
+    fn warmup_request_loads_the_model_without_a_prompt() {
+        let request = warmup_request(
+            &reqwest::Client::new(),
+            "http://localhost:11434",
+            "gemma4:e2b",
+        )
+        .build()
+        .unwrap();
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(
+            request.url().as_str(),
+            "http://localhost:11434/api/generate"
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({ "model": "gemma4:e2b", "keep_alive": "5m" })
+        );
+        assert!(request
+            .headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .is_none());
+    }
+
+    #[test]
+    fn warmup_fires_at_most_once_per_30_seconds() {
+        let gate = WarmupGate::new();
+        let start = Instant::now();
+        assert!(gate.try_acquire(start));
+        assert!(!gate.try_acquire(start + Duration::from_secs(1)));
+        assert!(!gate.try_acquire(start + Duration::from_secs(29)));
+        assert!(gate.try_acquire(start + Duration::from_secs(30)));
+        assert!(!gate.try_acquire(start + Duration::from_secs(31)));
+    }
+
+    #[tokio::test]
+    async fn warmup_is_never_sent_to_a_cloud_provider() {
+        for base_url in [
+            "https://api.groq.com/openai/v1",
+            "https://api.openai.com/v1",
+        ] {
+            assert!(!warm_up_ollama(&BatchSettings {
+                base_url: base_url.to_string(),
+                model: "whisper-large-v3".to_string(),
+                api_key: Some("key".to_string()),
+            }));
+        }
+    }
+
     /// Real end-to-end check of incremental transcription against a local
     /// Ollama: feeds a WAV in real time (100 ms pieces), so chunks are cut and
     /// transcribed while "recording", then releases and waits for the text.
@@ -1670,6 +1825,7 @@ mod tests {
         });
         let client = BatchClient::with_transcriber(timed);
         client.set_audio_format(sample_rate);
+        println!("warm-up fired: {}", warm_up_ollama(&settings)); // what a key press does
         client.init_session(settings.clone(), options);
         let mut rx = client.subscribe_to_transcriptions();
         let piece = sample_rate as usize * 2 / 10;
