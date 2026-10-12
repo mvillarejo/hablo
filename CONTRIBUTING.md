@@ -40,6 +40,8 @@ npm test
 npm run build
 ```
 
+If you add, remove or update a dependency, regenerate `THIRD_PARTY_NOTICES.md` with `npm run notices` (it needs [cargo-about](https://github.com/EmbarkStudios/cargo-about)) and commit the result. CI fails if a Rust crate's licence is not in the allowlist in `src-tauri/deny.toml`.
+
 For capture or lifecycle changes, also run:
 
 ```bash

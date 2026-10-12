@@ -241,3 +241,15 @@ To report a security vulnerability privately, see [SECURITY.md](SECURITY.md).
 Hablo is a personal fork of [GladiaFlow](https://github.com/gladiaio/gladiaflow) by Gladia, released under the [MIT License](LICENSE). The original copyright notice is kept in LICENSE.
 
 Hablo is not an official Gladia product and is not affiliated with or endorsed by Gladia. “Gladia” and “GladiaFlow” are trademarks of Gladia; see [TRADEMARKS.md](TRADEMARKS.md).
+
+### Third-party components
+
+The app includes open-source Rust crates, JavaScript modules and fonts, each under its own licence. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists them with their licence texts, and the app shows the same file from **App settings → Open-source licences**.
+
+Six Rust crates are under the Mozilla Public License 2.0: cssparser, cssparser-macros, selectors, dtoa-short, option-ext and nucleo-matcher. Hablo uses them unmodified, and the notices file links to their source code.
+
+After changing dependencies, run `npm run notices` to regenerate the file (it needs [cargo-about](https://github.com/EmbarkStudios/cargo-about)). CI checks every crate licence against the allowlist in `src-tauri/deny.toml` with [cargo-deny](https://github.com/EmbarkStudios/cargo-deny).
+
+### Model weights
+
+Hablo does not bundle any speech model. A local model you pull into Ollama comes under that model's own licence, and audio sent to a cloud provider such as Gladia is covered by that provider's terms.
