@@ -41,6 +41,7 @@ import {
 } from "./lib/dictationStats";
 import { pickFunnyHomeMessage } from "./lib/messages";
 import { DEFAULT_CUSTOM_VOCABULARY } from "./lib/customVocabulary";
+import { DEFAULT_INDICATOR_MODE, isIndicatorMode } from "./lib/indicatorMode";
 import {
   type AccessibilityState,
   isAccessibilityGranted,
@@ -169,6 +170,7 @@ export default function App() {
     audioDeviceSelection: { mode: "automatic" },
     hotkey: "Fn",
     copyToClipboard: false,
+    indicatorMode: DEFAULT_INDICATOR_MODE,
     customVocabulary: DEFAULT_CUSTOM_VOCABULARY,
   });
   const [audioDevices, setAudioDevices] = useState<AudioDeviceInfo[]>([]);
@@ -214,6 +216,7 @@ export default function App() {
   const languageSettingsLoaded = useRef(false);
   const vocabularySettingsLoaded = useRef(false);
   const copyToClipboardLoaded = useRef(false);
+  const indicatorModeLoaded = useRef(false);
   const activationModeLoaded = useRef(false);
   const audioDeviceSelectionLoaded = useRef(false);
 
@@ -279,7 +282,9 @@ export default function App() {
         : "recording"
       : isProcessing
         ? "finalizing"
-        : "idle";
+        : status.phase === "error"
+          ? "error"
+          : "idle";
     invoke("set_tray_activity", { activity }).catch(console.error);
   }, [isRecording, isProcessing, status.phase]);
   useEffect(() => {
@@ -311,6 +316,23 @@ export default function App() {
       enabled: settings.copyToClipboard,
     }).catch(console.error);
   }, [settings.copyToClipboard]);
+  useEffect(() => {
+    if (!indicatorModeLoaded.current) return;
+    invoke("set_indicator_mode", { mode: settings.indicatorMode }).catch(
+      console.error,
+    );
+  }, [settings.indicatorMode]);
+  useEffect(() => {
+    // Mode changes made from the tray show up here.
+    const unlisten = listen<unknown>("indicator-mode-changed", (event) => {
+      const mode = event.payload;
+      if (!isIndicatorMode(mode)) return;
+      setSettings((prev) =>
+        prev.indicatorMode === mode ? prev : { ...prev, indicatorMode: mode },
+      );
+    });
+    return () => void unlisten.then((off) => off());
+  }, []);
   useEffect(() => {
     if (!activationModeLoaded.current) return;
     invoke("save_activation_mode", { mode: settings.activationMode }).catch(
@@ -542,6 +564,10 @@ export default function App() {
         "get_copy_to_clipboard",
       ).catch(() => false);
 
+      const savedIndicatorMode = await invoke<unknown>(
+        "get_indicator_mode",
+      ).catch(() => DEFAULT_INDICATOR_MODE);
+
       const savedActivationMode = await invoke<ActivationMode>(
         "get_activation_mode",
       ).catch(() => "push-to-talk" as ActivationMode);
@@ -557,6 +583,9 @@ export default function App() {
           ? { languages: savedLanguages }
           : {}),
         copyToClipboard: savedCopyToClipboard,
+        indicatorMode: isIndicatorMode(savedIndicatorMode)
+          ? savedIndicatorMode
+          : DEFAULT_INDICATOR_MODE,
         activationMode: savedActivationMode,
         audioDeviceSelection: savedAudioDeviceSelection,
         customVocabulary: savedVocabulary,
@@ -564,6 +593,7 @@ export default function App() {
       languageSettingsLoaded.current = true;
       vocabularySettingsLoaded.current = true;
       copyToClipboardLoaded.current = true;
+      indicatorModeLoaded.current = true;
       activationModeLoaded.current = true;
       audioDeviceSelectionLoaded.current = true;
       setSettingsReady(true);
@@ -582,6 +612,7 @@ export default function App() {
           audioDeviceSelection: { mode: "automatic" },
           hotkey: settings.hotkey,
           copyToClipboard: settings.copyToClipboard,
+          indicatorMode: settings.indicatorMode,
           customVocabulary: settings.customVocabulary,
         },
         apiKeySet: !!apiKey,

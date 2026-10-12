@@ -4,6 +4,7 @@ import {
   sortKeys,
   parseHotkeyParts,
 } from "../lib/keyboardUtils";
+import { INDICATOR_MODE_OPTIONS } from "../lib/indicatorMode";
 import { InfoTooltip } from "./InfoTooltip";
 import { SettingsPageLayout } from "./SettingsPageLayout";
 
@@ -220,28 +221,68 @@ export function AppSettingsView({
         </div>
       </div>
 
-      <div className="form-group">
-        <label className="form-label">
-          Copy to clipboard
-          <InfoTooltip label="About copy to clipboard">
-            <strong>Copy to clipboard</strong>
-            When on, the full transcription is left on your clipboard after each
-            dictation.
-          </InfoTooltip>
-        </label>
-        <label className="toggle-switch" title="Copy to clipboard">
-          <input
-            type="checkbox"
-            checked={settings.copyToClipboard}
-            onChange={(e) =>
-              setSettings({
-                ...settings,
-                copyToClipboard: e.target.checked,
-              })
-            }
-          />
-          <span className="toggle-slider" />
-        </label>
+      <div className="settings-row">
+        <div className="form-group">
+          <label className="form-label">
+            Copy to clipboard
+            <InfoTooltip label="About copy to clipboard">
+              <strong>Copy to clipboard</strong>
+              When on, the full transcription is left on your clipboard after
+              each dictation.
+            </InfoTooltip>
+          </label>
+          <label className="toggle-switch" title="Copy to clipboard">
+            <input
+              type="checkbox"
+              checked={settings.copyToClipboard}
+              onChange={(e) =>
+                setSettings({
+                  ...settings,
+                  copyToClipboard: e.target.checked,
+                })
+              }
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" id="indicator-mode-label">
+            Floating indicator
+            <InfoTooltip label="About the floating indicator">
+              <strong>Floating indicator</strong>A small pill that shows your
+              mic level while you dictate and a spinner while the text is on its
+              way. Always keeps it on screen with a dimmed mic between
+              dictations. Drag it anywhere; it never takes focus from the app
+              you are typing in. Reset its position from the menu bar icon.
+            </InfoTooltip>
+          </label>
+          <div
+            className="segmented"
+            role="radiogroup"
+            aria-labelledby="indicator-mode-label"
+          >
+            {INDICATOR_MODE_OPTIONS.map((option) => (
+              <label
+                key={option.value}
+                className={`segmented-option${
+                  settings.indicatorMode === option.value ? " selected" : ""
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="indicator-mode"
+                  value={option.value}
+                  checked={settings.indicatorMode === option.value}
+                  onChange={() =>
+                    setSettings({ ...settings, indicatorMode: option.value })
+                  }
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="form-group">

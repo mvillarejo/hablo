@@ -1,0 +1,128 @@
+/* The window is transparent; only the pill is drawn. */
+html.indicator-html,
+body.indicator-body,
+body.indicator-body #root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+body.indicator-body #root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ttm-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 76px;
+  height: 32px;
+  cursor: grab;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-card);
+  background: rgba(12, 12, 12, 0.88);
+  box-shadow:
+    0 6px 16px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 var(--alpha-white-8);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition:
+    border-color var(--duration-160) var(--ease-out),
+    background-color var(--duration-160) var(--ease-out);
+}
+
+/* Always-visible mode between dictations: a quiet, dimmed mic. */
+.ttm-indicator--idle {
+  background: rgba(12, 12, 12, 0.6);
+}
+
+.ttm-indicator-mic {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.45;
+}
+
+.ttm-indicator-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+}
+
+.ttm-indicator-bars span {
+  width: 3px;
+  min-height: 4px;
+  border-radius: 2px;
+  background: var(--text-brand);
+  transition: height 70ms linear;
+}
+
+.ttm-indicator-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ttm-indicator-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  opacity: 0.35;
+  animation: ttm-indicator-dot 1.2s var(--ease-out) infinite;
+}
+
+.ttm-indicator-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.ttm-indicator-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes ttm-indicator-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.ttm-indicator--error {
+  border-color: color-mix(in srgb, var(--status-error) 70%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--status-error) 22%,
+    rgba(12, 12, 12, 0.9)
+  );
+}
+
+.ttm-indicator--error .ttm-indicator-bars span {
+  background: var(--status-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ttm-indicator-dots span {
+    animation: none;
+    opacity: 0.7;
+  }
+  .ttm-indicator-bars span {
+    transition: none;
+  }
+}

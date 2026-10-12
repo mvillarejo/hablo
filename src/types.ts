@@ -1,3 +1,5 @@
+import type { IndicatorMode } from "./lib/indicatorMode";
+
 export type AppPhase =
   | "idle"
   | "starting"
@@ -42,6 +44,7 @@ export interface AppSettings {
   audioDeviceSelection: AudioDeviceSelection;
   hotkey: string;
   copyToClipboard: boolean;
+  indicatorMode: IndicatorMode;
   customVocabulary: CustomVocabEntry[];
 }
 

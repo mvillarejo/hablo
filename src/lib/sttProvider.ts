@@ -80,8 +80,9 @@ export function uniqueProfileName(base: string, profiles: Profile[]): string {
 
 /** Gladia streams and finalizes within a few seconds of stop. */
 const GLADIA_SESSION_END_TIMEOUT_MS = 5_000;
-/** Batch providers transcribe after stop, one ≤28 s chunk at a time; local
- * inference on a long chunk can take tens of seconds. */
+/** Batch providers transcribe 6–25 s chunks one at a time, mostly while the
+ * user is still speaking; after stop the queue may still hold a backlog, and
+ * local inference on a chunk can take tens of seconds. Kept generous. */
 const BATCH_TIMEOUT_PER_CHUNK_MS = 60_000;
 const BATCH_CHUNK_SECONDS = 28;
 
