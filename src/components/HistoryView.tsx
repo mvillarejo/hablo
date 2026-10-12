@@ -75,7 +75,7 @@ export function HistoryView({
       <div className="history-header">
         <h2 className="setup-title">Transcription History</h2>
         <p className="setup-desc setup-desc--tight">
-          Transcriptions from TTM on this device.
+          Transcriptions from Hablo on this device.
         </p>
 
         <div className="history-toolbar">

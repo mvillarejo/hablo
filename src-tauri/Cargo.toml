@@ -1,5 +1,5 @@
 [package]
-name = "ttm"
+name = "hablo"
 version = "0.2.0"
 description = "Voice dictation for any app with local models via Ollama or Gladia live streaming"
 authors = ["Manuel Villarejo"]

@@ -1,6 +1,6 @@
-# Contributing to TTM
+# Contributing to Hablo
 
-Thanks for helping improve TTM. Bug fixes, platform work, documentation, and focused feature proposals are all welcome.
+Thanks for helping improve Hablo. Bug fixes, platform work, documentation, and focused feature proposals are all welcome.
 
 ## Before you start
 

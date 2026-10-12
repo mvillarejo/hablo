@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "productName": "TTM",
+  "productName": "Hablo",
   "version": "0.2.0",
-  "identifier": "in.villarejo.ttm",
+  "identifier": "in.villarejo.hablo",
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "TTM",
+        "title": "Hablo",
         "width": 800,
         "height": 600,
         "resizable": false,
@@ -23,7 +23,7 @@
       },
       {
         "label": "indicator",
-        "title": "TTM indicator",
+        "title": "Hablo indicator",
         "url": "indicator.html",
         "width": 120,
         "height": 48,

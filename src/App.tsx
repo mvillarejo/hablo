@@ -1884,7 +1884,7 @@ export default function App() {
     return (
       <main className="loading-shell">
         <div className="loading-spinner" />
-        <span className="loading-text">Loading TTM</span>
+        <span className="loading-text">Loading Hablo</span>
       </main>
     );
   }

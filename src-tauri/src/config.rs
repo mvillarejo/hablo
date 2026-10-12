@@ -281,14 +281,86 @@ impl Config {
     }
 }
 
-pub fn get_config_path() -> PathBuf {
-    let base = dirs::config_dir().unwrap_or_else(|| {
+/// App folder inside the platform config dir (`~/Library/Application Support`
+/// on macOS, `%APPDATA%` on Windows).
+const APP_CONFIG_DIR: &str = "hablo";
+/// Folder used while the app was called TTM (v0.1.0 to v0.2.x). Only read, by
+/// `migrate_legacy_config_dir`.
+const LEGACY_APP_CONFIG_DIR: &str = "ttm";
+/// Files carried over from the TTM folder. API keys live in config.json (there
+/// is no keychain), so they come across with it. config.json goes last: its
+/// presence is what marks the migration as done.
+const LEGACY_FILES: &[&str] = &["history.db", "config.json"];
+
+fn platform_config_dir() -> PathBuf {
+    dirs::config_dir().unwrap_or_else(|| {
         let fallback = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
         PathBuf::from(fallback)
-    });
-    base.join("ttm").join("config.json")
+    })
+}
+
+pub fn get_config_path() -> PathBuf {
+    platform_config_dir()
+        .join(APP_CONFIG_DIR)
+        .join("config.json")
+}
+
+/// First launch after the TTM -> Hablo rename: copy config.json and history.db
+/// from the TTM folder when the Hablo folder has no config yet. Copies rather
+/// than moves so TTM still works for a rollback, and never overwrites a Hablo
+/// file, so running it on every launch is safe. Must run before anything reads
+/// the config. Returns the names of the files copied.
+pub fn migrate_legacy_config_dir() -> Result<Vec<&'static str>, String> {
+    let _guard = config_mutex().lock().unwrap();
+    let base = platform_config_dir();
+    migrate_legacy_config_dir_at(
+        &base.join(LEGACY_APP_CONFIG_DIR),
+        &base.join(APP_CONFIG_DIR),
+    )
+}
+
+fn migrate_legacy_config_dir_at(
+    legacy: &Path,
+    current: &Path,
+) -> Result<Vec<&'static str>, String> {
+    if current.join("config.json").exists() || !legacy.join("config.json").is_file() {
+        return Ok(Vec::new());
+    }
+    fs::create_dir_all(current)
+        .map_err(|e| format!("Failed to create {}: {e}", current.display()))?;
+
+    let mut copied = Vec::new();
+    for &name in LEGACY_FILES {
+        let from = legacy.join(name);
+        let to = current.join(name);
+        if !from.is_file() {
+            continue;
+        }
+        if to.exists() {
+            log::info!(
+                "[config] keeping existing {}; not copying {}",
+                to.display(),
+                from.display()
+            );
+            continue;
+        }
+        // Copy to a temp name and rename, so an interrupted copy never leaves a
+        // partial file that would block the retry on the next launch.
+        let temp = current.join(format!("{name}.migrating"));
+        if let Err(e) = fs::copy(&from, &temp).and_then(|_| fs::rename(&temp, &to)) {
+            let _ = fs::remove_file(&temp);
+            return Err(format!(
+                "Failed to copy {} to {}: {e}",
+                from.display(),
+                to.display()
+            ));
+        }
+        log::info!("[config] copied {} to {}", from.display(), to.display());
+        copied.push(name);
+    }
+    Ok(copied)
 }
 
 fn with_config(f: impl FnOnce(&mut Config)) -> Result<(), String> {
@@ -2044,5 +2116,199 @@ mod tests {
             load_config_from_path(&path).unwrap().profiles_state(),
             state
         );
+    }
+
+    /// A TTM-era config as v0.2.0 writes it after its TCC cleanup ran.
+    const TTM_CONFIG: &str = r#"{
+        "hotkey": "Section",
+        "languages": ["en", "es"],
+        "indicator_mode": "always",
+        "indicator_position": {"x": 2440.0, "y": 1384.0},
+        "accessibility_tcc_reset_done": true,
+        "accessibility_prompted": true,
+        "accessibility_cleanup_generation": 2,
+        "installed_version": "0.2.0",
+        "profiles": [
+            {"id": "local-ollama", "name": "Local Ollama", "kind": "openai_compat",
+             "base_url": "http://localhost:11434/v1", "model": "gemma4:e4b", "api_key": ""},
+            {"id": "groq", "name": "Groq", "kind": "openai_compat",
+             "base_url": "https://api.groq.com/openai/v1", "model": "whisper-large-v3", "api_key": "gsk-secret"}
+        ],
+        "active_profile_id": "groq"
+    }"#;
+
+    struct MigrationDirs {
+        root: TestConfigDir,
+    }
+
+    impl MigrationDirs {
+        fn new() -> Self {
+            Self {
+                root: TestConfigDir::new(),
+            }
+        }
+        fn legacy(&self) -> PathBuf {
+            self.root.0.join("ttm")
+        }
+        fn current(&self) -> PathBuf {
+            self.root.0.join("hablo")
+        }
+        fn write_legacy(&self, name: &str, contents: &str) {
+            fs::create_dir_all(self.legacy()).unwrap();
+            fs::write(self.legacy().join(name), contents).unwrap();
+        }
+        fn write_current(&self, name: &str, contents: &str) {
+            fs::create_dir_all(self.current()).unwrap();
+            fs::write(self.current().join(name), contents).unwrap();
+        }
+        fn migrate(&self) -> Vec<&'static str> {
+            migrate_legacy_config_dir_at(&self.legacy(), &self.current()).unwrap()
+        }
+        fn read(&self, dir: PathBuf, name: &str) -> String {
+            fs::read_to_string(dir.join(name)).unwrap()
+        }
+    }
+
+    #[test]
+    fn legacy_migration_copies_config_and_history_and_keeps_the_originals() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+        dirs.write_legacy("history.db", "sqlite bytes");
+
+        assert_eq!(dirs.migrate(), vec!["history.db", "config.json"]);
+
+        assert_eq!(dirs.read(dirs.current(), "config.json"), TTM_CONFIG);
+        assert_eq!(dirs.read(dirs.current(), "history.db"), "sqlite bytes");
+        assert_eq!(dirs.read(dirs.legacy(), "config.json"), TTM_CONFIG);
+        assert_eq!(dirs.read(dirs.legacy(), "history.db"), "sqlite bytes");
+        let leftovers: Vec<_> = fs::read_dir(dirs.current())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().ends_with(".migrating"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
+    }
+
+    #[test]
+    fn migrated_config_keeps_settings_keys_and_the_tcc_flags() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+        dirs.migrate();
+
+        let config = load_config_from_path(&dirs.current().join("config.json")).unwrap();
+        assert_eq!(config.hotkey.as_deref(), Some("Section"));
+        assert_eq!(config.indicator_mode, Some(IndicatorMode::Always));
+        assert_eq!(
+            config.indicator_position,
+            Some(IndicatorPosition {
+                x: 2440.0,
+                y: 1384.0
+            })
+        );
+        let state = config.profiles_state();
+        assert_eq!(state.active_profile_id, "groq");
+        assert_eq!(state.profiles.len(), 2);
+        assert!(matches!(
+            &config.active_profile().unwrap().settings,
+            ProfileSettings::OpenAiCompat { api_key, .. } if api_key == "gsk-secret"
+        ));
+
+        // The TTM cleanup already ran, so Hablo must not run the one-time
+        // `tccutil reset` again: that would also wipe TTM's grant.
+        assert!(!crate::permissions::accessibility::is_tcc_cleanup_pending(
+            config.accessibility_tcc_reset_done.unwrap(),
+            config.accessibility_cleanup_generation.unwrap()
+        ));
+    }
+
+    #[test]
+    fn fresh_config_without_a_legacy_dir_still_runs_the_tcc_cleanup() {
+        let dirs = MigrationDirs::new();
+
+        assert!(dirs.migrate().is_empty());
+        assert!(!dirs.current().exists());
+
+        let config = load_config_from_path(&dirs.current().join("config.json")).unwrap();
+        assert!(crate::permissions::accessibility::is_tcc_cleanup_pending(
+            config.accessibility_tcc_reset_done.unwrap(),
+            config.accessibility_cleanup_generation.unwrap()
+        ));
+    }
+
+    #[test]
+    fn legacy_migration_is_idempotent_and_never_overwrites_hablo_settings() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+        dirs.write_legacy("history.db", "ttm history");
+        dirs.migrate();
+
+        dirs.write_current("config.json", r#"{"hotkey":"F13"}"#);
+        dirs.write_current("history.db", "hablo history");
+        assert!(dirs.migrate().is_empty());
+
+        assert_eq!(
+            dirs.read(dirs.current(), "config.json"),
+            r#"{"hotkey":"F13"}"#
+        );
+        assert_eq!(dirs.read(dirs.current(), "history.db"), "hablo history");
+    }
+
+    #[test]
+    fn existing_hablo_config_blocks_the_whole_migration() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+        dirs.write_legacy("history.db", "ttm history");
+        dirs.write_current("config.json", "{}");
+
+        assert!(dirs.migrate().is_empty());
+        assert!(!dirs.current().join("history.db").exists());
+    }
+
+    #[test]
+    fn legacy_migration_keeps_a_hablo_history_that_already_exists() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+        dirs.write_legacy("history.db", "ttm history");
+        dirs.write_current("history.db", "hablo history");
+
+        assert_eq!(dirs.migrate(), vec!["config.json"]);
+        assert_eq!(dirs.read(dirs.current(), "history.db"), "hablo history");
+    }
+
+    #[test]
+    fn legacy_migration_copies_config_alone_when_there_is_no_history() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+
+        assert_eq!(dirs.migrate(), vec!["config.json"]);
+        assert!(!dirs.current().join("history.db").exists());
+    }
+
+    #[test]
+    fn legacy_history_without_a_config_is_not_migrated() {
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("history.db", "ttm history");
+
+        assert!(dirs.migrate().is_empty());
+        assert!(!dirs.current().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_copy_leaves_no_partial_config_and_can_be_retried() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dirs = MigrationDirs::new();
+        dirs.write_legacy("config.json", TTM_CONFIG);
+        let legacy_config = dirs.legacy().join("config.json");
+        fs::set_permissions(&legacy_config, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = migrate_legacy_config_dir_at(&dirs.legacy(), &dirs.current());
+        fs::set_permissions(&legacy_config, fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert!(result.is_err());
+        assert!(!dirs.current().join("config.json").exists());
+        assert!(!dirs.current().join("config.json.migrating").exists());
+        assert_eq!(dirs.migrate(), vec!["config.json"]);
     }
 }

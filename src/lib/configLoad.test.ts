@@ -29,7 +29,7 @@ describe("loadSavedProfiles", () => {
     expect(failure).toEqual({
       ok: false,
       message:
-        "TTM couldn't read your saved settings. Your API key has not been changed.",
+        "Hablo couldn't read your saved settings. Your API key has not been changed.",
     });
   });
 
@@ -77,7 +77,7 @@ describe("loadSavedProfiles", () => {
     expect(result).toEqual({
       ok: false,
       message:
-        "TTM couldn't reset your settings. Your original settings file was not deleted.",
+        "Hablo couldn't reset your settings. Your original settings file was not deleted.",
     });
   });
 });

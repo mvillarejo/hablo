@@ -134,7 +134,7 @@ async fn apply_tray_activity(
         "recording" => {
             let icon = tray_icon_from_bytes(TRAY_ICON_DICTATING)?;
             tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
-            tray.set_tooltip(Some("TTM — Dictating…"))
+            tray.set_tooltip(Some("Hablo — Dictating…"))
                 .map_err(|e| e.to_string())?;
         }
         "starting" | "finalizing" => {
@@ -148,9 +148,9 @@ async fn apply_tray_activity(
                         if let Ok(tray) = tray_handle(&app_handle) {
                             let _ = tray.set_icon(Some(icon));
                             let tooltip = if starting {
-                                "TTM — Starting microphone…"
+                                "Hablo — Starting microphone…"
                             } else {
-                                "TTM — Finalizing…"
+                                "Hablo — Finalizing…"
                             };
                             let _ = tray.set_tooltip(Some(tooltip));
                         }
@@ -164,7 +164,7 @@ async fn apply_tray_activity(
         _ => {
             let icon = tray_icon_from_bytes(TRAY_ICON_IDLE)?;
             tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
-            tray.set_tooltip(Some("TTM")).map_err(|e| e.to_string())?;
+            tray.set_tooltip(Some("Hablo")).map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -1130,7 +1130,7 @@ fn send_paste_keystroke() -> Result<(), String> {
 }
 
 /// Reveal the folder containing the rolling log file (e.g.
-/// `~/Library/Logs/in.villarejo.ttm/` on macOS) so the user can attach or share it.
+/// `~/Library/Logs/in.villarejo.hablo/` on macOS) so the user can attach or share it.
 #[tauri::command]
 fn open_log_folder(app: tauri::AppHandle) -> Result<(), String> {
     let dir = app
@@ -1142,14 +1142,14 @@ fn open_log_folder(app: tauri::AppHandle) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        // The log directory (~/Library/Logs/in.villarejo.ttm) can be
+        // The log directory (~/Library/Logs/in.villarejo.hablo) can be
         // interpreted by macOS LaunchServices as an application bundle, so
         // `open <dir>` may try to *launch* it and fail ("the application cannot
         // be opened because its executable is missing"). Reveal the log file in
         // Finder with `open -R` instead, which sidesteps the package
         // interpretation and hands the user the exact file they need to share.
         // Falls back to revealing the directory itself if no log file exists yet.
-        let log_file = dir.join("ttm.log");
+        let log_file = dir.join("hablo.log");
         let target: &std::path::Path = if log_file.exists() { &log_file } else { &dir };
         std::process::Command::new("open")
             .arg("-R")
@@ -1405,7 +1405,7 @@ fn main() {
             tauri_plugin_log::Builder::new()
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                        file_name: Some("ttm".into()),
+                        file_name: Some("hablo".into()),
                     }),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                 ])
@@ -1416,6 +1416,15 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // Before anything reads the config: carry settings over from TTM.
+            match config::migrate_legacy_config_dir() {
+                Ok(copied) if !copied.is_empty() => {
+                    log::info!("[config] migrated from TTM: {}", copied.join(", "))
+                }
+                Ok(_) => {}
+                Err(e) => log::error!("[config] migration from TTM failed: {e}"),
+            }
+
             app.manage(AppState {
                 transcriber: Arc::new(TokioMutex::new(Transcriber::for_provider(
                     Provider::Gladia,
@@ -1490,7 +1499,7 @@ fn main() {
             let idle_icon = tray_icon_from_bytes(TRAY_ICON_IDLE)?;
             let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(idle_icon)
-                .tooltip("TTM")
+                .tooltip("Hablo")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
