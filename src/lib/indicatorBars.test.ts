@@ -36,10 +36,16 @@ describe("barHeights", () => {
 
 describe("isIndicatorPhase", () => {
   it("accepts only the phases the backend emits", () => {
-    for (const phase of ["hidden", "listening", "transcribing", "error"]) {
+    for (const phase of [
+      "hidden",
+      "idle",
+      "listening",
+      "transcribing",
+      "error",
+    ]) {
       expect(isIndicatorPhase(phase)).toBe(true);
     }
-    for (const value of ["idle", "", null, undefined, 3]) {
+    for (const value of ["recording", "", null, undefined, 3]) {
       expect(isIndicatorPhase(value)).toBe(false);
     }
   });

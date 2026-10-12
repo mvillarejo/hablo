@@ -1,5 +1,6 @@
 /** Phases the floating indicator can show (mirrors `indicator::Phase`). */
-export type IndicatorPhase = "hidden" | "listening" | "transcribing" | "error";
+export type IndicatorPhase =
+  "hidden" | "idle" | "listening" | "transcribing" | "error";
 
 export const BAR_WEIGHTS = [0.55, 0.8, 1, 0.8, 0.55];
 export const BAR_MIN_PX = 4;
@@ -28,6 +29,7 @@ export function barHeights(level: number, tick = 0): number[] {
 export function isIndicatorPhase(value: unknown): value is IndicatorPhase {
   return (
     value === "hidden" ||
+    value === "idle" ||
     value === "listening" ||
     value === "transcribing" ||
     value === "error"

@@ -44,8 +44,19 @@ struct Config {
     /// Whether to leave the final transcription on the clipboard after a
     /// dictation session (instead of restoring the user's original clipboard).
     copy_to_clipboard: Option<bool>,
-    /// Whether to show the floating "listening" pill while dictating.
+    /// Legacy on/off switch for the floating pill. Read for migration to
+    /// `indicator_mode`, never written.
+    #[serde(skip_serializing_if = "Option::is_none")]
     show_indicator: Option<bool>,
+    /// When the floating pill is shown: off, while dictating, or always.
+    /// Left unset by `Default` so `fill_defaults` can derive it from the
+    /// legacy flag; always present on disk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indicator_mode: Option<IndicatorMode>,
+    /// Where the user dragged the pill (top-left, logical px). Absent means
+    /// the default bottom-centre placement.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indicator_position: Option<IndicatorPosition>,
     /// How the trigger key starts a dictation: "push-to-talk" (hold) or
     /// "toggle" (press once to start, once to stop).
     activation_mode: Option<String>,
@@ -92,7 +103,9 @@ impl Default for Config {
             languages: Some(vec!["en".to_string()]),
             code_switching: None,
             copy_to_clipboard: Some(false),
-            show_indicator: Some(true),
+            show_indicator: None,
+            indicator_mode: None,
+            indicator_position: None,
             activation_mode: Some(DEFAULT_ACTIVATION_MODE.to_string()),
             custom_vocabulary: Some(default_custom_vocabulary()),
             endpointing: None,
@@ -124,9 +137,10 @@ impl Config {
         if self.copy_to_clipboard.is_none() {
             self.copy_to_clipboard = defaults.copy_to_clipboard;
         }
-        if self.show_indicator.is_none() {
-            self.show_indicator = defaults.show_indicator;
+        if self.indicator_mode.is_none() {
+            self.indicator_mode = Some(IndicatorMode::from_legacy(self.show_indicator));
         }
+        self.show_indicator = None;
         if self.activation_mode.is_none() {
             self.activation_mode = defaults.activation_mode;
         }
@@ -376,9 +390,73 @@ pub fn copy_to_clipboard() -> Result<bool, String> {
     read_config(|config| config.copy_to_clipboard.unwrap_or(false))
 }
 
-/// Whether the floating indicator is on. Defaults to `true` when absent.
-pub fn show_indicator() -> Result<bool, String> {
-    read_config(|config| config.show_indicator.unwrap_or(true))
+/// When the floating pill is shown. Defaults to "while dictating".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndicatorMode {
+    Off,
+    #[default]
+    WhileDictating,
+    Always,
+}
+
+impl IndicatorMode {
+    pub const ALL: [IndicatorMode; 3] = [Self::Off, Self::WhileDictating, Self::Always];
+
+    /// The old `show_indicator` bool: `false` is Off, `true` or absent is the default.
+    fn from_legacy(show_indicator: Option<bool>) -> Self {
+        match show_indicator {
+            Some(false) => Self::Off,
+            _ => Self::default(),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::WhileDictating => "while-dictating",
+            Self::Always => "always",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::WhileDictating => "While Dictating",
+            Self::Always => "Always Visible",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.as_str() == id)
+    }
+}
+
+/// Top-left of the pill in logical px (global desktop coordinates).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IndicatorPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
+pub fn indicator_mode() -> Result<IndicatorMode, String> {
+    read_config(|config| config.indicator_mode.unwrap_or_default())
+}
+
+pub fn save_indicator_mode(mode: IndicatorMode) -> Result<(), String> {
+    with_config(|config| config.indicator_mode = Some(mode))
+}
+
+pub fn indicator_position() -> Result<Option<IndicatorPosition>, String> {
+    read_config(|config| config.indicator_position)
+}
+
+/// Save where the user dragged the pill, or forget it (`None`).
+pub fn save_indicator_position(position: Option<IndicatorPosition>) -> Result<(), String> {
+    if position.is_some_and(|p| !p.x.is_finite() || !p.y.is_finite()) {
+        return Err("Indicator position must be finite".to_string());
+    }
+    with_config(|config| config.indicator_position = position)
 }
 
 pub fn audio_device_selection() -> Result<AudioDeviceSelection, String> {
@@ -947,15 +1025,8 @@ pub async fn get_copy_to_clipboard() -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn save_show_indicator(enabled: bool) -> Result<(), String> {
-    with_config(|config| {
-        config.show_indicator = Some(enabled);
-    })
-}
-
-#[tauri::command]
-pub async fn get_show_indicator() -> Result<bool, String> {
-    show_indicator()
+pub async fn get_indicator_mode() -> Result<IndicatorMode, String> {
+    indicator_mode()
 }
 
 #[tauri::command]
@@ -1025,6 +1096,8 @@ mod tests {
             "code_switching": null,
             "copy_to_clipboard": null,
             "show_indicator": null,
+            "indicator_mode": null,
+            "indicator_position": null,
             "custom_vocabulary": null,
             "endpointing": null,
             "accessibility_tcc_reset_done": null,
@@ -1037,7 +1110,9 @@ mod tests {
         assert_eq!(config.hotkey.as_deref(), Some(default_hotkey().as_str()));
         assert_eq!(config.languages, Some(vec!["en".to_string()]));
         assert_eq!(config.copy_to_clipboard, Some(false));
-        assert_eq!(config.show_indicator, Some(true));
+        assert_eq!(config.indicator_mode, Some(IndicatorMode::WhileDictating));
+        assert!(config.show_indicator.is_none());
+        assert!(config.indicator_position.is_none());
         assert_eq!(config.custom_vocabulary, Some(default_custom_vocabulary()));
         // Moved into the profile: the legacy fields stay unset.
         assert!(config.code_switching.is_none());
@@ -1065,20 +1140,77 @@ mod tests {
     }
 
     #[test]
-    fn floating_indicator_defaults_on_for_existing_configs_and_keeps_an_opt_out() {
+    fn legacy_show_indicator_migrates_to_a_mode() {
         let dir = TestConfigDir::new();
         let path = dir.config_path();
-        fs::write(&path, r#"{"hotkey":"Fn","copy_to_clipboard":true}"#).unwrap();
-        assert_eq!(
-            load_config_from_path(&path).unwrap().show_indicator,
-            Some(true)
-        );
+        for (json, mode) in [
+            (r#"{"hotkey":"Fn"}"#, IndicatorMode::WhileDictating),
+            (r#"{"show_indicator":null}"#, IndicatorMode::WhileDictating),
+            (r#"{"show_indicator":true}"#, IndicatorMode::WhileDictating),
+            (r#"{"show_indicator":false}"#, IndicatorMode::Off),
+            // An explicit mode wins over a stale legacy flag.
+            (
+                r#"{"show_indicator":false,"indicator_mode":"always"}"#,
+                IndicatorMode::Always,
+            ),
+        ] {
+            fs::write(&path, json).unwrap();
+            let config = load_config_from_path(&path).unwrap();
+            assert_eq!(config.indicator_mode, Some(mode), "{json}");
+            assert!(config.show_indicator.is_none(), "{json}");
+        }
+
+        // The migrated mode is written back and the legacy key is dropped.
         fs::write(&path, r#"{"hotkey":"Fn","show_indicator":false}"#).unwrap();
+        with_config_at(&path, |_| {}).unwrap();
+        let written: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(written["indicator_mode"], "off");
+        assert!(written.get("show_indicator").is_none());
+        assert!(written.get("indicator_position").is_none());
+        assert_eq!(written["hotkey"], "Fn");
+    }
+
+    #[test]
+    fn indicator_mode_and_position_reject_bad_values() {
+        for json in [
+            r#"{"show_indicator":"yes"}"#,
+            r#"{"indicator_mode":"sometimes"}"#,
+            r#"{"indicator_mode":true}"#,
+            r#"{"indicator_position":{"x":"1","y":2}}"#,
+            r#"{"indicator_position":{"x":1}}"#,
+        ] {
+            assert!(serde_json::from_str::<Config>(json).is_err(), "{json}");
+        }
         assert_eq!(
-            load_config_from_path(&path).unwrap().show_indicator,
-            Some(false)
+            serde_json::from_str::<IndicatorMode>(r#""while-dictating""#).unwrap(),
+            IndicatorMode::WhileDictating
         );
-        assert!(serde_json::from_str::<Config>(r#"{"show_indicator":"yes"}"#).is_err());
+        for mode in IndicatorMode::ALL {
+            assert_eq!(IndicatorMode::from_id(mode.as_str()), Some(mode));
+            assert_eq!(
+                serde_json::to_string(&mode).unwrap(),
+                format!("\"{}\"", mode.as_str())
+            );
+        }
+        assert_eq!(IndicatorMode::from_id("bogus"), None);
+    }
+
+    #[test]
+    fn indicator_position_round_trips_and_can_be_cleared() {
+        let dir = TestConfigDir::new();
+        let path = dir.config_path();
+        let spot = IndicatorPosition { x: -800.5, y: 42.0 };
+        with_config_at(&path, |config| config.indicator_position = Some(spot)).unwrap();
+        assert_eq!(
+            load_config_from_path(&path).unwrap().indicator_position,
+            Some(spot)
+        );
+        with_config_at(&path, |config| config.indicator_position = None).unwrap();
+        assert_eq!(
+            load_config_from_path(&path).unwrap().indicator_position,
+            None
+        );
     }
 
     #[test]

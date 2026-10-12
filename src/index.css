@@ -1233,6 +1233,54 @@ select.form-input {
   display: none;
 }
 
+.segmented {
+  display: flex;
+  gap: 2px;
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 2px;
+  border-radius: var(--radius-1);
+  background: var(--bg-tertiary);
+}
+
+.segmented-option {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-1);
+  color: var(--text-secondary);
+  font-size: var(--font-size-12);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background var(--duration-160) var(--ease-out),
+    color var(--duration-160) var(--ease-out);
+}
+
+.segmented-option:hover {
+  color: var(--text-primary);
+}
+
+.segmented-option.selected {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.segmented-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented-option:has(input:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
 .toggle-slider {
   position: relative;
   width: 36px;

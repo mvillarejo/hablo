@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu};
+use tauri::menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{async_runtime::spawn, Emitter, Manager, State};
 use tokio::sync::Mutex as TokioMutex;
@@ -26,7 +26,7 @@ mod utterance_cleaner;
 mod vocabulary;
 
 use audio::{AudioCapture, AudioDeviceInfo, AudioDeviceSelection};
-use config::{NewProfile, Profile, ProfileSettings, ProfilesState};
+use config::{IndicatorMode, NewProfile, Profile, ProfileSettings, ProfilesState};
 use gladia::GladiaClient;
 use history::TranscriptionHistoryPage;
 use hotkey::HotkeyManager;
@@ -176,8 +176,8 @@ async fn set_tray_activity(
     state: State<'_, AppState>,
     activity: String,
 ) -> Result<(), String> {
-    let enabled = config::show_indicator().unwrap_or(true);
-    indicator::apply(&app, indicator::phase_for_activity(&activity), enabled);
+    let mode = config::indicator_mode().unwrap_or_default();
+    indicator::apply(&app, indicator::phase_for_activity(&activity), mode);
     apply_tray_activity(&app, &state, &activity).await
 }
 
@@ -280,6 +280,8 @@ async fn test_profile(profile: &Profile) -> Result<String, String> {
 // --- Transcription profiles ---
 
 const TRAY_PROFILE_PREFIX: &str = "profile:";
+const TRAY_INDICATOR_PREFIX: &str = "indicator-mode:";
+const TRAY_INDICATOR_RESET: &str = "indicator-reset";
 
 #[tauri::command]
 async fn list_profiles() -> Result<ProfilesState, String> {
@@ -344,6 +346,57 @@ fn profiles_changed(
     result
 }
 
+/// Settings and the tray both change the pill's mode through here, so each
+/// one updates the other live.
+#[tauri::command]
+fn set_indicator_mode(app: tauri::AppHandle, mode: IndicatorMode) -> Result<(), String> {
+    if config::indicator_mode()? == mode {
+        return Ok(());
+    }
+    config::save_indicator_mode(mode)?;
+    log::info!("[indicator] mode -> {}", mode.as_str());
+    indicator::set_mode(&app, mode);
+    if let Err(error) = config::profiles_state().and_then(|state| refresh_tray_menu(&app, &state)) {
+        log::warn!("[tray] failed to rebuild menu: {error}");
+    }
+    let _ = app.emit("indicator-mode-changed", mode);
+    Ok(())
+}
+
+fn build_indicator_menu(
+    app: &tauri::AppHandle,
+    mode: IndicatorMode,
+) -> tauri::Result<Submenu<tauri::Wry>> {
+    let modes = IndicatorMode::ALL
+        .into_iter()
+        .map(|item| {
+            CheckMenuItem::with_id(
+                app,
+                format!("{TRAY_INDICATOR_PREFIX}{}", item.as_str()),
+                item.label(),
+                true,
+                item == mode,
+                None::<&str>,
+            )
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let reset = MenuItem::with_id(
+        app,
+        TRAY_INDICATOR_RESET,
+        "Reset Position",
+        true,
+        None::<&str>,
+    )?;
+    let mut items: Vec<&dyn IsMenuItem<tauri::Wry>> = modes
+        .iter()
+        .map(|item| item as &dyn IsMenuItem<tauri::Wry>)
+        .collect();
+    items.push(&separator);
+    items.push(&reset);
+    Submenu::with_items(app, "Floating Indicator", true, &items)
+}
+
 fn build_tray_menu(
     app: &tauri::AppHandle,
     profiles: &ProfilesState,
@@ -369,6 +422,7 @@ fn build_tray_menu(
         .map(|item| item as &dyn IsMenuItem<tauri::Wry>)
         .collect();
     let provider_menu = Submenu::with_items(app, "Provider", true, &profile_refs)?;
+    let indicator_menu = build_indicator_menu(app, config::indicator_mode().unwrap_or_default())?;
 
     #[cfg(all(target_os = "macos", debug_assertions))]
     {
@@ -379,10 +433,19 @@ fn build_tray_menu(
             true,
             None::<&str>,
         )?;
-        Menu::with_items(app, &[&show_i, &provider_menu, &reset_ax_i, &quit_i])
+        Menu::with_items(
+            app,
+            &[
+                &show_i,
+                &provider_menu,
+                &indicator_menu,
+                &reset_ax_i,
+                &quit_i,
+            ],
+        )
     }
     #[cfg(not(all(target_os = "macos", debug_assertions)))]
-    Menu::with_items(app, &[&show_i, &provider_menu, &quit_i])
+    Menu::with_items(app, &[&show_i, &provider_menu, &indicator_menu, &quit_i])
 }
 
 fn refresh_tray_menu(app: &tauri::AppHandle, profiles: &ProfilesState) -> Result<(), String> {
@@ -836,7 +899,7 @@ async fn start_audio_capture(
     let ready_app = app_handle.clone();
     let ready_capture_id = capture_id.unwrap_or_default();
     let capture_started = Instant::now();
-    let show_level = config::show_indicator().unwrap_or(true);
+    let show_level = config::indicator_mode().unwrap_or_default() != IndicatorMode::Off;
     tokio::task::spawn_blocking(move || {
         let mut readiness = FirstAudioChunkGate::default();
         let mut meter = indicator::LevelMeter::default();
@@ -1442,9 +1505,25 @@ fn main() {
                     "quit" => {
                         app.exit(0);
                     }
+                    TRAY_INDICATOR_RESET => {
+                        if let Err(error) = indicator::reset_position(app) {
+                            log::warn!("[indicator] failed to reset position: {error}");
+                        }
+                    }
                     id => {
                         if let Some(profile_id) = id.strip_prefix(TRAY_PROFILE_PREFIX) {
                             handle_tray_profile_click(app, profile_id);
+                        } else if let Some(mode) = id
+                            .strip_prefix(TRAY_INDICATOR_PREFIX)
+                            .and_then(IndicatorMode::from_id)
+                        {
+                            if let Err(error) = set_indicator_mode(app.clone(), mode) {
+                                log::warn!("[indicator] failed to set mode: {error}");
+                            }
+                            // Re-sync the checkmarks with what is actually saved.
+                            if let Ok(state) = config::profiles_state() {
+                                let _ = refresh_tray_menu(app, &state);
+                            }
                         }
                     }
                 })
@@ -1461,6 +1540,7 @@ fn main() {
                 .build(app)?;
 
             indicator::setup(app.handle());
+            indicator::set_mode(app.handle(), config::indicator_mode().unwrap_or_default());
 
             // Intercept window close: hide instead of destroying
             if let Some(window) = app.get_webview_window("main") {
@@ -1517,8 +1597,8 @@ fn main() {
             config::get_language_settings,
             config::save_copy_to_clipboard,
             config::get_copy_to_clipboard,
-            config::save_show_indicator,
-            config::get_show_indicator,
+            set_indicator_mode,
+            config::get_indicator_mode,
             indicator::get_indicator_phase,
             config::save_activation_mode,
             config::get_activation_mode,

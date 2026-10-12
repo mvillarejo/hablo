@@ -4,6 +4,7 @@ import {
   sortKeys,
   parseHotkeyParts,
 } from "../lib/keyboardUtils";
+import { INDICATOR_MODE_OPTIONS } from "../lib/indicatorMode";
 import { InfoTooltip } from "./InfoTooltip";
 import { SettingsPageLayout } from "./SettingsPageLayout";
 
@@ -246,28 +247,41 @@ export function AppSettingsView({
         </div>
 
         <div className="form-group">
-          <label className="form-label">
-            Show floating indicator
+          <label className="form-label" id="indicator-mode-label">
+            Floating indicator
             <InfoTooltip label="About the floating indicator">
-              <strong>Show floating indicator</strong>A small pill at the bottom
-              of your screen shows your mic level while you dictate and a
-              spinner while the text is on its way. It never takes focus from
-              the app you are typing in.
+              <strong>Floating indicator</strong>A small pill that shows your
+              mic level while you dictate and a spinner while the text is on its
+              way. Always keeps it on screen with a dimmed mic between
+              dictations. Drag it anywhere; it never takes focus from the app
+              you are typing in. Reset its position from the menu bar icon.
             </InfoTooltip>
           </label>
-          <label className="toggle-switch" title="Show floating indicator">
-            <input
-              type="checkbox"
-              checked={settings.showIndicator}
-              onChange={(e) =>
-                setSettings({
-                  ...settings,
-                  showIndicator: e.target.checked,
-                })
-              }
-            />
-            <span className="toggle-slider" />
-          </label>
+          <div
+            className="segmented"
+            role="radiogroup"
+            aria-labelledby="indicator-mode-label"
+          >
+            {INDICATOR_MODE_OPTIONS.map((option) => (
+              <label
+                key={option.value}
+                className={`segmented-option${
+                  settings.indicatorMode === option.value ? " selected" : ""
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="indicator-mode"
+                  value={option.value}
+                  checked={settings.indicatorMode === option.value}
+                  onChange={() =>
+                    setSettings({ ...settings, indicatorMode: option.value })
+                  }
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
         </div>
       </div>
 

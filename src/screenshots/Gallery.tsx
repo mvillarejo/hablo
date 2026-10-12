@@ -24,7 +24,7 @@ const MOCK_SETTINGS: AppSettings = {
   audioDeviceSelection: { mode: "automatic" },
   hotkey: "Fn",
   copyToClipboard: false,
-  showIndicator: true,
+  indicatorMode: "while-dictating",
   customVocabulary: [
     ...DEFAULT_CUSTOM_VOCABULARY,
     {
@@ -510,6 +510,7 @@ export function ScreenshotGallery() {
         <div id="10-floating-indicator" className="indicator-gallery">
           {(
             [
+              ["Idle (always visible)", "idle", 0, 0],
               ["Listening, quiet", "listening", 0.45, 2],
               ["Listening, speaking", "listening", 0.85, 5],
               ["Transcribing", "transcribing", 0, 0],

@@ -24,6 +24,7 @@ body.indicator-body #root {
   box-sizing: border-box;
   width: 76px;
   height: 32px;
+  cursor: grab;
   border-radius: var(--radius-full);
   border: 1px solid var(--border-card);
   background: rgba(12, 12, 12, 0.88);
@@ -35,6 +36,21 @@ body.indicator-body #root {
   transition:
     border-color var(--duration-160) var(--ease-out),
     background-color var(--duration-160) var(--ease-out);
+}
+
+/* Always-visible mode between dictations: a quiet, dimmed mic. */
+.ttm-indicator--idle {
+  background: rgba(12, 12, 12, 0.6);
+}
+
+.ttm-indicator-mic {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--text-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.45;
 }
 
 .ttm-indicator-bars {

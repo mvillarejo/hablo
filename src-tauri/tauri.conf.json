@@ -35,6 +35,7 @@
         "skipTaskbar": true,
         "focus": false,
         "focusable": false,
+        "acceptFirstMouse": true,
         "shadow": false,
         "visible": false
       }

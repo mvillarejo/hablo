@@ -1,6 +1,6 @@
 {
   "identifier": "indicator",
-  "description": "Floating dictation indicator: listens for state and mic-level events",
+  "description": "Floating dictation indicator: listens for state and mic-level events and can be dragged",
   "windows": ["indicator"],
-  "permissions": ["core:event:default"]
+  "permissions": ["core:event:default", "core:window:allow-start-dragging"]
 }
