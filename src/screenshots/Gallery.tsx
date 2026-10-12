@@ -499,6 +499,7 @@ export function ScreenshotGallery() {
             version="0.1.0"
             onDone={noop}
             onOpenLogs={noop}
+            onOpenLicenses={noop}
           />
         </AppShell>
       </ScreenFrame>

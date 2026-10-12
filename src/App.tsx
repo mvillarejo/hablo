@@ -1982,6 +1982,9 @@ export default function App() {
               version={appVersion}
               onDone={() => setNavScreen("home")}
               onOpenLogs={() => invoke("open_log_folder").catch(console.error)}
+              onOpenLicenses={() =>
+                invoke("open_licenses_window").catch(console.error)
+              }
             />
           )}
           {activeScreen === "vocabulary" && (

@@ -1174,6 +1174,26 @@ fn open_log_folder(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Show THIRD_PARTY_NOTICES.md (bundled into licenses.html) in its own window.
+/// Async because creating a window from a sync command deadlocks on Windows.
+#[tauri::command]
+async fn open_licenses_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("licenses") {
+        window.show().map_err(|e| e.to_string())?;
+        return window.set_focus().map_err(|e| e.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "licenses",
+        tauri::WebviewUrl::App("licenses.html".into()),
+    )
+    .title("Open-source licences")
+    .inner_size(760.0, 640.0)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn get_platform() -> String {
     std::env::consts::OS.to_string()
@@ -1596,6 +1616,7 @@ fn main() {
             get_recording_state,
             set_recording_state,
             open_log_folder,
+            open_licenses_window,
             get_platform,
             show_window,
             hide_window,

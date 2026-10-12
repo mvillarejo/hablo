@@ -19,6 +19,7 @@ export default defineConfig({
         main: path.resolve(__dirname, "index.html"),
         indicator: path.resolve(__dirname, "indicator.html"),
         screenshots: path.resolve(__dirname, "screenshots.html"),
+        licenses: path.resolve(__dirname, "licenses.html"),
       },
     },
   },

@@ -35,6 +35,7 @@ export function AppSettingsView({
   version,
   onDone,
   onOpenLogs,
+  onOpenLicenses,
 }: {
   settings: AppSettings;
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
@@ -65,6 +66,7 @@ export function AppSettingsView({
   version: string;
   onDone: () => void;
   onOpenLogs: () => void;
+  onOpenLicenses: () => void;
 }) {
   const renderKbdKeys = (keys: string[]) =>
     sortKeys(keys).map((key, i) => (
@@ -388,6 +390,21 @@ export function AppSettingsView({
           onClick={onOpenLogs}
         >
           Open logs folder
+        </button>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">About</label>
+        <p className="setup-desc setup-desc--tight">
+          Hablo is open source under the MIT License and includes third-party
+          components under their own licences.
+        </p>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={onOpenLicenses}
+        >
+          Open-source licences
         </button>
       </div>
 

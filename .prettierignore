@@ -3,6 +3,7 @@ package-lock.json
 src-tauri/Cargo.lock
 src-tauri/gen/
 src-tauri/target/
+THIRD_PARTY_NOTICES.md
 
 # Design source files
 design/
