@@ -80,7 +80,7 @@ Pick when it appears in **App settings** under **Floating indicator**, or from t
 
 Drag the pill wherever you like and TTM keeps it there, across restarts too. Until you move it, and whenever its saved spot is on a display that is no longer connected, it sits at the bottom centre of the screen your pointer is on, just above the Dock. **Reset Position** in the same submenu puts it back there.
 
-The pill never takes focus or brings TTM to the front, even while you drag it, so the paste still lands in the app you were typing in. Only the pill itself catches the mouse; clicks on the transparent area around it reach the window underneath.
+The pill never takes focus or brings TTM to the front, even while you drag it, so the paste still lands in the app you were typing in.
 
 ## Incremental transcription
 
