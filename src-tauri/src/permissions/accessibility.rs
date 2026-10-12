@@ -3,8 +3,12 @@ use serde::{Deserialize, Serialize};
 /// Bump when a one-time TCC cleanup must re-run for users stuck on a prior migration.
 pub const CURRENT_CLEANUP_GENERATION: u32 = 2;
 
-const CURRENT_TCC_BUNDLE_ID: &str = "in.villarejo.ttm";
-const LEGACY_TCC_BUNDLE_IDS: &[&str] = &["io.gladiaflow.app"];
+const CURRENT_TCC_BUNDLE_ID: &str = "in.villarejo.hablo";
+/// Bundle ids the app shipped under before: TTM (v0.1.0 to v0.2.x) and
+/// GladiaFlow. Cleared only by the cleanup a fresh config triggers. A config
+/// copied over from TTM already has the cleanup marked done, so the reset never
+/// runs for it and TTM keeps its grant for a rollback.
+const LEGACY_TCC_BUNDLE_IDS: &[&str] = &["in.villarejo.ttm", "io.gladiaflow.app"];
 
 /// Legacy bundle ids are best-effort cleanup. Only the current bundle's reset
 /// determines whether the migration completed and may be persisted.
@@ -281,16 +285,59 @@ mod tests {
 
     #[test]
     fn migration_completes_when_current_bundle_reset_succeeds() {
-        let results = [("in.villarejo.ttm", true), ("io.gladiaflow.app", false)];
+        let results = [
+            ("in.villarejo.hablo", true),
+            ("in.villarejo.ttm", false),
+            ("io.gladiaflow.app", false),
+        ];
 
         assert!(migration_cleanup_succeeded(&results));
     }
 
     #[test]
     fn migration_retries_when_current_bundle_reset_fails() {
-        let results = [("in.villarejo.ttm", false), ("io.gladiaflow.app", true)];
+        let results = [
+            ("in.villarejo.hablo", false),
+            ("in.villarejo.ttm", true),
+            ("io.gladiaflow.app", true),
+        ];
 
         assert!(!migration_cleanup_succeeded(&results));
+    }
+
+    #[test]
+    fn legacy_ids_cover_ttm_and_gladiaflow_but_never_the_current_bundle() {
+        assert_eq!(CURRENT_TCC_BUNDLE_ID, "in.villarejo.hablo");
+        assert_eq!(
+            LEGACY_TCC_BUNDLE_IDS,
+            &["in.villarejo.ttm", "io.gladiaflow.app"]
+        );
+        assert!(!LEGACY_TCC_BUNDLE_IDS.contains(&CURRENT_TCC_BUNDLE_ID));
+    }
+
+    /// Fresh Hablo config: the first launch is untrusted, resets once and marks
+    /// the cleanup done; once the user grants access, no later launch resets.
+    #[test]
+    fn fresh_config_resets_once_and_never_wipes_the_grant_given_after() {
+        assert!(needs_tcc_reset(false, 0, false));
+        assert!(!needs_tcc_reset(true, CURRENT_CLEANUP_GENERATION, true));
+        assert!(!needs_tcc_reset(true, CURRENT_CLEANUP_GENERATION, false));
+    }
+
+    /// Fresh config whose first reset failed, so it stays pending: if the user
+    /// grants access before the next launch, the grant is kept.
+    #[test]
+    fn pending_cleanup_keeps_a_grant_given_after_a_failed_reset() {
+        assert!(is_tcc_cleanup_pending(false, 0));
+        assert!(!needs_tcc_reset(false, 0, true));
+    }
+
+    /// Config copied from TTM: cleanup already done, so Hablo never resets,
+    /// whether or not it has been granted yet.
+    #[test]
+    fn migrated_config_never_resets() {
+        assert!(!is_tcc_cleanup_pending(true, CURRENT_CLEANUP_GENERATION));
+        assert!(!needs_tcc_reset(true, CURRENT_CLEANUP_GENERATION, false));
     }
 
     #[test]

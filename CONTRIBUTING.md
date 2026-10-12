@@ -1,11 +1,11 @@
-# Contributing to TTM
+# Contributing to Hablo
 
-Thanks for helping improve TTM. Bug fixes, platform work, documentation, and focused feature proposals are all welcome.
+Thanks for helping improve Hablo. Bug fixes, platform work, documentation, and focused feature proposals are all welcome.
 
 ## Before you start
 
 - Read the [README](README.md) for product overview, setup, and architecture.
-- For larger changes, [open an issue](https://github.com/mvillarejo/ttm/issues) first so the design can be discussed before implementation.
+- For larger changes, [open an issue](https://github.com/mvillarejo/hablo/issues) first so the design can be discussed before implementation.
 - On macOS, Accessibility grants are tied to the app's code-signing identity. Changing the release signing certificate can require users to re-grant Accessibility.
 
 ## Development setup
@@ -14,8 +14,8 @@ Thanks for helping improve TTM. Bug fixes, platform work, documentation, and foc
 2. Clone the repo, install dependencies, and start the desktop app:
 
 ```bash
-git clone https://github.com/mvillarejo/ttm.git
-cd ttm
+git clone https://github.com/mvillarejo/hablo.git
+cd hablo
 npm ci
 npm run tauri:dev
 ```
@@ -39,6 +39,8 @@ npm run format
 npm test
 npm run build
 ```
+
+If you add, remove or update a dependency, regenerate `THIRD_PARTY_NOTICES.md` with `npm run notices` (it needs [cargo-about](https://github.com/EmbarkStudios/cargo-about)) and commit the result. CI fails if a Rust crate's licence is not in the allowlist in `src-tauri/deny.toml`.
 
 For capture or lifecycle changes, also run:
 

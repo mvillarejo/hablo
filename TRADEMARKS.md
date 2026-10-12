@@ -22,6 +22,10 @@ The following assets are Gladia / GladiaFlow brand materials and are not license
 
 If you fork or redistribute this software, rename the product and replace the branded assets above unless you have written permission from Gladia to keep them. Do not imply that your fork is an official Gladia product.
 
+## Hablo
+
+Hablo is an independent fork of GladiaFlow maintained by Manuel Villarejo. It is not affiliated with, endorsed by or sponsored by Gladia. The Gladia name appears in this repository only to credit the original project and to describe the optional Gladia API integration. The Gladia brand assets listed above are not used in Hablo; the app has its own name, icons and logo.
+
 ## Brand approval checklist
 
 Before expanding permitted-use language here, Gladia brand or legal should confirm:

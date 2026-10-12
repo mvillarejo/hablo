@@ -1,0 +1,21 @@
+# cargo-about config for THIRD_PARTY_NOTICES.md (regenerate with `npm run notices`).
+# Order is preference: for dual-licensed crates the first accepted licence wins.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "Unicode-3.0",
+    "MIT-0",
+    "0BSD",
+    "CC0-1.0",
+    "Unlicense",
+    "MPL-2.0",
+]
+# The platforms Hablo ships for.
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-pc-windows-msvc"]
+ignore-dev-dependencies = true

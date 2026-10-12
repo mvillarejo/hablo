@@ -82,12 +82,12 @@ const MOCK_HISTORY: TranscriptionHistoryPage = {
   items: [
     {
       id: "1",
-      text: "TTM makes dictation feel effortless once permissions and your API key are set up.",
+      text: "Hablo makes dictation feel effortless once permissions and your API key are set up.",
       created_at: new Date(Date.now() - 3600000).toISOString(),
     },
     {
       id: "2",
-      text: "Custom vocabulary helps with product names like TTM and internal acronyms.",
+      text: "Custom vocabulary helps with product names like Hablo and internal acronyms.",
       created_at: new Date(Date.now() - 86400000).toISOString(),
     },
     {
@@ -499,6 +499,7 @@ export function ScreenshotGallery() {
             version="0.1.0"
             onDone={noop}
             onOpenLogs={noop}
+            onOpenLicenses={noop}
           />
         </AppShell>
       </ScreenFrame>

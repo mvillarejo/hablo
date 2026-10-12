@@ -34,7 +34,7 @@ export function PermissionsView({
     <div className="setup-step setup-step-center">
       <h2 className="setup-title">Permissions Required</h2>
       <p className="setup-desc">
-        TTM needs these permissions to work. Enable each one, then click
+        Hablo needs these permissions to work. Enable each one, then click
         Re-check.
       </p>
       <div className="permissions-list">

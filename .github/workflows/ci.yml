@@ -34,6 +34,19 @@ jobs:
       - name: Check formatting
         run: npm run format:check
 
+  licenses:
+    runs-on: ubuntu-latest
+    name: Licences
+    steps:
+      - uses: actions/checkout@v6
+
+      # Fails on any crate licence missing from the allowlist in src-tauri/deny.toml.
+      - name: Check dependency licences
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check licenses
+
   test:
     runs-on: macos-latest
     name: Test

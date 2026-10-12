@@ -6,7 +6,7 @@
 //! `focus: false`, `focusable: false`) like Parley's recorder widget. On macOS
 //! it is turned into a non-activating panel and shown with
 //! `orderFrontRegardless`, so neither showing nor dragging it ever activates
-//! TTM: the paste has to land in the user's frontmost app.
+//! Hablo: the paste has to land in the user's frontmost app.
 
 use crate::config::{self, IndicatorMode, IndicatorPosition};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -179,7 +179,7 @@ pub fn current_phase() -> Phase {
 }
 
 /// One-time window setup: on macOS the window becomes a non-activating panel
-/// (so a click or drag never activates TTM), joins full-screen Spaces and
+/// (so a click or drag never activates Hablo), joins full-screen Spaces and
 /// stays out of the window cycle. Drags are saved as the pill's position.
 pub fn setup(app: &AppHandle) {
     let Some(window) = app.get_webview_window(LABEL) else {
@@ -288,7 +288,7 @@ fn target(app: &AppHandle) -> Option<LogicalPosition<f64>> {
 
 /// Move (when `at` is set) and show the indicator without taking focus from
 /// the frontmost app (Parley's `show_widget` pattern): `orderFrontRegardless`
-/// orders the window in without making it key or activating TTM. On macOS the
+/// orders the window in without making it key or activating Hablo. On macOS the
 /// move happens in the same main-thread call, so the pill never flashes at its
 /// old spot first (tauri's `set_position` lands asynchronously).
 fn show(window: &WebviewWindow, at: Option<LogicalPosition<f64>>) {
@@ -396,7 +396,7 @@ pub fn get_indicator_phase() -> Phase {
 
 /// The indicator as a non-activating NSPanel (Parley's `widget_window::panel`,
 /// minus the keyboard mode: the pill never takes keys). A regular NSWindow
-/// activates TTM when clicked; a non-activating panel can be dragged while
+/// activates Hablo when clicked; a non-activating panel can be dragged while
 /// the user's app stays frontmost.
 #[cfg(target_os = "macos")]
 mod panel {

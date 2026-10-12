@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>TTM</h1>
+  <h1>Hablo</h1>
 
   <p><strong>Fast, accurate voice dictation in any desktop app.</strong></p>
 
@@ -17,13 +17,13 @@
   </p>
 </div>
 
-TTM is an open-source desktop app that turns speech into text wherever you type. Hold a hotkey, speak, and the app sends your audio to the [Gladia Live Transcription API](https://docs.gladia.io/) or to a [local model through Ollama](#using-a-local-model-ollama), cleans the result, and pastes it into the focused application.
+Hablo is an open-source desktop app that turns speech into text wherever you type. Hold a hotkey, speak, and the app sends your audio to the [Gladia Live Transcription API](https://docs.gladia.io/) or to a [local model through Ollama](#using-a-local-model-ollama), cleans the result, and pastes it into the focused application.
 
 > [!NOTE]
 >
-> TTM currently supports macOS and Windows. A [Gladia API key](https://app.gladia.io/) is required unless you [use a local model](#using-a-local-model-ollama).
+> Hablo currently supports macOS and Windows. A [Gladia API key](https://app.gladia.io/) is required unless you [use a local model](#using-a-local-model-ollama).
 
-## Why TTM?
+## Why Hablo?
 
 - **Dictate anywhere** — paste transcribed speech into editors, browsers, chat apps, and more.
 - **See results live** — with Gladia, partial and final transcripts arrive over a low-latency WebSocket session.
@@ -35,17 +35,17 @@ TTM is an open-source desktop app that turns speech into text wherever you type.
 
 ## Quick start
 
-This fork has no GitHub Releases yet, so build TTM from source. Install the [prerequisites](#prerequisites) first. On macOS:
+This fork has no GitHub Releases yet, so build Hablo from source. Install the [prerequisites](#prerequisites) first. On macOS:
 
 ```bash
 npm ci
 npm run tauri build
 ```
 
-Copy `src-tauri/target/release/bundle/macos/TTM.app` to `/Applications`, then:
+Copy `src-tauri/target/release/bundle/macos/Hablo.app` to `/Applications`, then:
 
-1. Launch TTM and either choose a local model ([Ollama](#using-a-local-model-ollama), see below) or enter a [Gladia API key](https://app.gladia.io/).
-2. Grant microphone access. On macOS, also grant Accessibility access so TTM can paste into other apps.
+1. Launch Hablo and either choose a local model ([Ollama](#using-a-local-model-ollama), see below) or enter a [Gladia API key](https://app.gladia.io/).
+2. Grant microphone access. On macOS, also grant Accessibility access so Hablo can paste into other apps.
 3. Focus any text field and use the activation shortcut:
    - **macOS:** hold <kbd>Fn</kbd> / <kbd>Globe</kbd>
    - **Windows:** hold <kbd>Ctrl</kbd> + <kbd>Space</kbd>
@@ -53,9 +53,13 @@ Copy `src-tauri/target/release/bundle/macos/TTM.app` to `/Applications`, then:
 
 The shortcut and activation mode can be changed in **App settings**.
 
+### Coming from TTM
+
+Hablo was called TTM up to v0.2.0. On its first launch, Hablo copies `config.json` (settings, profiles and API keys) and `history.db` from the old `ttm` config folder, unless Hablo already has a config of its own. The TTM files stay where they are, so the old app still works. macOS treats Hablo as a new app, so grant Microphone and Accessibility access again. You can then remove the old TTM entry with `tccutil reset Accessibility in.villarejo.ttm`.
+
 ## Using a local model (Ollama)
 
-TTM can transcribe with a local model through Ollama's OpenAI-compatible API instead of Gladia. You don't need an API key, and audio never leaves your machine.
+Hablo can transcribe with a local model through Ollama's OpenAI-compatible API instead of Gladia. You don't need an API key, and audio never leaves your machine.
 
 1. Install [Ollama](https://ollama.com) and pull the model:
 
@@ -66,7 +70,7 @@ TTM can transcribe with a local model through Ollama's OpenAI-compatible API ins
 2. A new install starts with an active **Local Ollama** profile. If you already used Gladia, open **Transcription settings** and select **Local Ollama**, or add an **OpenAI-compatible** profile. The onboarding screen also has **Use a local model (Ollama) instead**.
 3. Keep the defaults (base URL `http://localhost:11434/v1`, model `gemma4:e4b`, no API key), click **Edit** on the profile and then **Test connection**.
 
-There is no streaming with this provider, so no text shows while you speak. TTM still transcribes in the background as you go (see [Incremental transcription](#incremental-transcription)). In testing, a 3-second clip came back in about 1 second, and a 41-second clip was pasted 4.9 seconds after release (`gemma4:e2b` on a 16 GB M2).
+There is no streaming with this provider, so no text shows while you speak. Hablo still transcribes in the background as you go (see [Incremental transcription](#incremental-transcription)). In testing, a 3-second clip came back in about 1 second, and a 41-second clip was pasted 4.9 seconds after release (`gemma4:e2b` on a 16 GB M2).
 
 Cloud services that expose an OpenAI-compatible `/audio/transcriptions` endpoint, such as Groq or OpenAI, work the same way: add an OpenAI-compatible profile with that service's base URL, API key and model. In that case the audio goes to that service.
 
@@ -74,28 +78,28 @@ You can keep several profiles, for example two Ollama servers with different mod
 
 ## Floating indicator
 
-A small pill shows what a dictation is doing. Its bars follow your microphone level while TTM listens, pulsing dots show while the text is transcribed, and a brief red tint appears if the dictation fails.
+A small pill shows what a dictation is doing. Its bars follow your microphone level while Hablo listens, pulsing dots show while the text is transcribed, and a brief red tint appears if the dictation fails.
 
 Pick when it appears in **App settings** under **Floating indicator**, or from the **Floating Indicator** submenu of the menu bar icon. Both show the same choice, and a change in one updates the other straight away. While dictating is the default: the pill appears when you start and hides once the text is pasted or the dictation is cancelled. Always keeps it on screen, over full-screen apps too, with a dimmed microphone between dictations. Off never shows it. If you switched the indicator off in an earlier version, it stays off.
 
-Drag the pill wherever you like and TTM keeps it there, across restarts too. Until you move it, and whenever its saved spot is on a display that is no longer connected, it sits at the bottom centre of the screen your pointer is on, just above the Dock. **Reset Position** in the same submenu puts it back there.
+Drag the pill wherever you like and Hablo keeps it there, across restarts too. Until you move it, and whenever its saved spot is on a display that is no longer connected, it sits at the bottom centre of the screen your pointer is on, just above the Dock. **Reset Position** in the same submenu puts it back there.
 
-The pill never takes focus or brings TTM to the front, even while you drag it, so the paste still lands in the app you were typing in.
+The pill never takes focus or brings Hablo to the front, even while you drag it, so the paste still lands in the app you were typing in.
 
 ## Incremental transcription
 
-With an OpenAI-compatible profile (local Ollama by default), TTM transcribes while you speak, one or two sentences at a time, so the model always gets complete phrases. It tells a short pause (a breath or a comma) apart from the longer pause at the end of a sentence, and it adjusts to your own rhythm as you talk, so fast and slow speakers both work. Once a chunk holds at least 6 seconds of audio, TTM ends it at the next sentence pause and sends it in the background while you keep talking. If no sentence pause comes within 15 seconds, it cuts at the longest pause so far. Only speech with no pauses at all is cut at 25 seconds. Chunks go out one at a time, so a laptop running the model locally never runs two transcriptions in parallel. When you release the key, only the last few seconds are left to send. TTM joins the chunk texts in order and pastes them once, as before.
+With an OpenAI-compatible profile (local Ollama by default), Hablo transcribes while you speak, one or two sentences at a time, so the model always gets complete phrases. It tells a short pause (a breath or a comma) apart from the longer pause at the end of a sentence, and it adjusts to your own rhythm as you talk, so fast and slow speakers both work. Once a chunk holds at least 6 seconds of audio, Hablo ends it at the next sentence pause and sends it in the background while you keep talking. If no sentence pause comes within 15 seconds, it cuts at the longest pause so far. Only speech with no pauses at all is cut at 25 seconds. Chunks go out one at a time, so a laptop running the model locally never runs two transcriptions in parallel. When you release the key, only the last few seconds are left to send. Hablo joins the chunk texts in order and pastes them once, as before.
 
-If you press Esc, cancel, or hit an error, TTM discards every pending chunk and any late result. A partial transcript is never pasted.
+If you press Esc, cancel, or hit an error, Hablo discards every pending chunk and any late result. A partial transcript is never pasted.
 
-For a local Ollama server (a localhost address or port 11434), TTM also asks Ollama to load the model as soon as you press the key, so it is ready when the first chunk arrives. That request goes out at most every 30 seconds and is never sent to cloud providers, which bill per request.
+For a local Ollama server (a localhost address or port 11434), Hablo also asks Ollama to load the model as soon as you press the key, so it is ready when the first chunk arrives. That request goes out at most every 30 seconds and is never sent to cloud providers, which bill per request.
 
 ## Using a Logitech mouse button
 
-Logi Options+ takes over the extra buttons on a Logitech mouse, so TTM can't see them. Map the button to your trigger key instead:
+Logi Options+ takes over the extra buttons on a Logitech mouse, so Hablo can't see them. Map the button to your trigger key instead:
 
 1. In Logi Options+, select the button and choose **Keyboard shortcut**.
-2. Press your TTM trigger key (for example <kbd>§</kbd> or <kbd>F13</kbd>) to record it.
+2. Press your Hablo trigger key (for example <kbd>§</kbd> or <kbd>F13</kbd>) to record it.
 3. If you use app-specific profiles in Options+, set the same shortcut in each one.
 
 Then hold the button to dictate, as you would hold the key.
@@ -114,8 +118,8 @@ Windows development also requires the Microsoft C++ Build Tools and WebView2. We
 ### Run locally
 
 ```bash
-git clone https://github.com/mvillarejo/ttm.git
-cd ttm
+git clone https://github.com/mvillarejo/hablo.git
+cd hablo
 npm ci
 npm run tauri:dev
 ```
@@ -210,11 +214,11 @@ The release workflow runs for tags matching `v*`, stamps the tag version into th
 
 ## Privacy and data handling
 
-TTM is a local desktop client. It does not operate its own cloud backend for dictation. With the default Gladia provider, microphone audio is sent to Gladia’s Live Transcription API, which is the sole remote processor for that audio. With a [local model](#using-a-local-model-ollama), audio never leaves your machine.
+Hablo is a local desktop client. It does not operate its own cloud backend for dictation. With the default Gladia provider, microphone audio is sent to Gladia’s Live Transcription API, which is the sole remote processor for that audio. With a [local model](#using-a-local-model-ollama), audio never leaves your machine.
 
 | Data | What happens |
 | --- | --- |
-| Microphone audio | Gladia: during an active dictation session, PCM audio is streamed over WebSocket to the Gladia Live Transcription API. OpenAI-compatible provider: audio is held in memory until you stop, then sent as WAV to the configured base URL. With local Ollama (the default base URL), audio never leaves the machine. TTM does not save audio files locally. |
+| Microphone audio | Gladia: during an active dictation session, PCM audio is streamed over WebSocket to the Gladia Live Transcription API. OpenAI-compatible provider: audio is held in memory until you stop, then sent as WAV to the configured base URL. With local Ollama (the default base URL), audio never leaves the machine. Hablo does not save audio files locally. |
 | Transcripts | Text returns from the selected provider. Cleaned transcript text and the session ID (Gladia's, or a locally generated one) are stored locally in SQLite (`history.db` in the app config directory). |
 | Settings and API key | Stored locally in `config.json` in the user config directory (API keys, transcription provider and endpoint, hotkey, languages, custom vocabulary, and related preferences). |
 | Clipboard | Used transiently to paste transcribed text into the focused app. An optional setting can leave the final transcript on the clipboard. |
@@ -224,7 +228,7 @@ Audio and transcripts processed by Gladia are subject to Gladia’s own policies
 - [Privacy notice](https://www.gladia.io/privacy-notice)
 - [Terms & conditions](https://www.gladia.io/terms-conditions)
 
-Those documents cover retention, subprocessors, and related platform practices. For how TTM stores data on your machine, see also [SECURITY.md](SECURITY.md).
+Those documents cover retention, subprocessors, and related platform practices. For how Hablo stores data on your machine, see also [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
@@ -234,6 +238,18 @@ To report a security vulnerability privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-TTM is a personal fork of [GladiaFlow](https://github.com/gladiaio/gladiaflow) by Gladia, released under the [MIT License](LICENSE). The original copyright notice is kept in LICENSE.
+Hablo is a personal fork of [GladiaFlow](https://github.com/gladiaio/gladiaflow) by Gladia, released under the [MIT License](LICENSE). The original copyright notice is kept in LICENSE.
 
-TTM is not an official Gladia product and is not affiliated with or endorsed by Gladia. “Gladia” and “GladiaFlow” are trademarks of Gladia; see [TRADEMARKS.md](TRADEMARKS.md).
+Hablo is not an official Gladia product and is not affiliated with or endorsed by Gladia. “Gladia” and “GladiaFlow” are trademarks of Gladia; see [TRADEMARKS.md](TRADEMARKS.md).
+
+### Third-party components
+
+The app includes open-source Rust crates, JavaScript modules and fonts, each under its own licence. [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) lists them with their licence texts, and the app shows the same file from **App settings → Open-source licences**.
+
+Six Rust crates are under the Mozilla Public License 2.0: cssparser, cssparser-macros, selectors, dtoa-short, option-ext and nucleo-matcher. Hablo uses them unmodified, and the notices file links to their source code.
+
+After changing dependencies, run `npm run notices` to regenerate the file (it needs [cargo-about](https://github.com/EmbarkStudios/cargo-about)). CI checks every crate licence against the allowlist in `src-tauri/deny.toml` with [cargo-deny](https://github.com/EmbarkStudios/cargo-deny).
+
+### Model weights
+
+Hablo does not bundle any speech model. A local model you pull into Ollama comes under that model's own licence, and audio sent to a cloud provider such as Gladia is covered by that provider's terms.

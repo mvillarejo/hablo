@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for TTM",
+  "description": "Default capabilities for Hablo",
   "windows": ["main"],
   "permissions": [
     "core:default",

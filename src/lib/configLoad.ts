@@ -2,9 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ProfilesState } from "./sttProvider";
 
 export const CONFIG_LOAD_ERROR_MESSAGE =
-  "TTM couldn't read your saved settings. Your API key has not been changed.";
+  "Hablo couldn't read your saved settings. Your API key has not been changed.";
 export const CONFIG_RESET_ERROR_MESSAGE =
-  "TTM couldn't reset your settings. Your original settings file was not deleted.";
+  "Hablo couldn't reset your settings. Your original settings file was not deleted.";
 
 export type ProfilesLoadResult =
   { ok: true; profiles: ProfilesState } | { ok: false; message: string };

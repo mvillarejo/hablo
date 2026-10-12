@@ -35,6 +35,7 @@ export function AppSettingsView({
   version,
   onDone,
   onOpenLogs,
+  onOpenLicenses,
 }: {
   settings: AppSettings;
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
@@ -65,6 +66,7 @@ export function AppSettingsView({
   version: string;
   onDone: () => void;
   onOpenLogs: () => void;
+  onOpenLicenses: () => void;
 }) {
   const renderKbdKeys = (keys: string[]) =>
     sortKeys(keys).map((key, i) => (
@@ -86,7 +88,14 @@ export function AppSettingsView({
       title="App settings"
       footer={
         <p className="settings-version-footer">
-          {version ? `v${version}` : ""}
+          {version ? `v${version} · ` : ""}
+          <button
+            type="button"
+            className="settings-footer-link"
+            onClick={onOpenLicenses}
+          >
+            Open-source licences
+          </button>
         </p>
       }
     >

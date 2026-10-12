@@ -301,13 +301,13 @@ impl GladiaClient {
                 .filter_map(|entry| entry.language.as_deref())
                 .collect();
             log::info!(
-                "[ttm] Live session custom vocabulary: {} entries ({} unique terms) across languages {:?}",
+                "[hablo] Live session custom vocabulary: {} entries ({} unique terms) across languages {:?}",
                 vocab.len(),
                 unique_terms.len(),
                 languages
             );
         } else {
-            log::info!("[ttm] Live session request has no custom vocabulary");
+            log::info!("[hablo] Live session request has no custom vocabulary");
         }
 
         let client = reqwest::Client::new();
@@ -316,7 +316,7 @@ impl GladiaClient {
             .header("x-gladia-key", api_key)
             .header(
                 "x-gladia-version",
-                format!("TTM/{}", env!("CARGO_PKG_VERSION")),
+                format!("Hablo/{}", env!("CARGO_PKG_VERSION")),
             )
             .header("Content-Type", "application/json")
             .json(&request)
@@ -470,7 +470,7 @@ impl GladiaClient {
             .header("x-gladia-key", api_key)
             .header(
                 "x-gladia-version",
-                format!("TTM/{}", env!("CARGO_PKG_VERSION")),
+                format!("Hablo/{}", env!("CARGO_PKG_VERSION")),
             )
             .send()
             .await?;
