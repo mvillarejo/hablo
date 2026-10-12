@@ -74,9 +74,13 @@ You can keep several profiles, for example two Ollama servers with different mod
 
 ## Floating indicator
 
-While you dictate, a small pill appears at the bottom centre of the screen your pointer is on, just above the Dock. Its bars follow your microphone level while TTM listens, pulsing dots show while the text is transcribed, and a brief red tint appears if the dictation fails. It hides once the text is pasted or the dictation is cancelled.
+A small pill shows what a dictation is doing. Its bars follow your microphone level while TTM listens, pulsing dots show while the text is transcribed, and a brief red tint appears if the dictation fails.
 
-The pill never takes focus or brings TTM to the front, so the paste still lands in the app you were typing in. Clicks go through it to the window underneath. It is on by default; to turn it off, open **App settings** and switch off **Show floating indicator**.
+Pick when it appears in **App settings** under **Floating indicator**, or from the **Floating Indicator** submenu of the menu bar icon. Both show the same choice, and a change in one updates the other straight away. While dictating is the default: the pill appears when you start and hides once the text is pasted or the dictation is cancelled. Always keeps it on screen, over full-screen apps too, with a dimmed microphone between dictations. Off never shows it. If you switched the indicator off in an earlier version, it stays off.
+
+Drag the pill wherever you like and TTM keeps it there, across restarts too. Until you move it, and whenever its saved spot is on a display that is no longer connected, it sits at the bottom centre of the screen your pointer is on, just above the Dock. **Reset Position** in the same submenu puts it back there.
+
+The pill never takes focus or brings TTM to the front, even while you drag it, so the paste still lands in the app you were typing in. Only the pill itself catches the mouse; clicks on the transparent area around it reach the window underneath.
 
 ## Incremental transcription
 
@@ -178,7 +182,7 @@ Important backend modules include:
 - `vocabulary.rs` — custom vocabulary expansion
 - `config.rs` and `history.rs` — local settings and dictation history
 
-The UI uses two windows: `main` for onboarding, history, and settings; and `overlay` for the floating dictation indicator.
+The UI uses two windows: `main` for onboarding, history, and settings; and `indicator` for the floating dictation indicator.
 
 ## Platform support
 
