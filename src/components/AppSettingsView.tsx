@@ -88,7 +88,14 @@ export function AppSettingsView({
       title="App settings"
       footer={
         <p className="settings-version-footer">
-          {version ? `v${version}` : ""}
+          {version ? `v${version} · ` : ""}
+          <button
+            type="button"
+            className="settings-footer-link"
+            onClick={onOpenLicenses}
+          >
+            Open-source licences
+          </button>
         </p>
       }
     >
@@ -390,21 +397,6 @@ export function AppSettingsView({
           onClick={onOpenLogs}
         >
           Open logs folder
-        </button>
-      </div>
-
-      <div className="form-group">
-        <label className="form-label">About</label>
-        <p className="setup-desc setup-desc--tight">
-          Hablo is open source under the MIT License and includes third-party
-          components under their own licences.
-        </p>
-        <button
-          type="button"
-          className="btn btn-ghost btn-sm"
-          onClick={onOpenLicenses}
-        >
-          Open-source licences
         </button>
       </div>
 
