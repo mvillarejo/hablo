@@ -5,7 +5,7 @@ Thanks for helping improve Hablo. Bug fixes, platform work, documentation, and f
 ## Before you start
 
 - Read the [README](README.md) for product overview, setup, and architecture.
-- For larger changes, [open an issue](https://github.com/mvillarejo/ttm/issues) first so the design can be discussed before implementation.
+- For larger changes, [open an issue](https://github.com/mvillarejo/hablo/issues) first so the design can be discussed before implementation.
 - On macOS, Accessibility grants are tied to the app's code-signing identity. Changing the release signing certificate can require users to re-grant Accessibility.
 
 ## Development setup
@@ -14,8 +14,8 @@ Thanks for helping improve Hablo. Bug fixes, platform work, documentation, and f
 2. Clone the repo, install dependencies, and start the desktop app:
 
 ```bash
-git clone https://github.com/mvillarejo/ttm.git
-cd ttm
+git clone https://github.com/mvillarejo/hablo.git
+cd hablo
 npm ci
 npm run tauri:dev
 ```

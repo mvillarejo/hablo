@@ -118,8 +118,8 @@ Windows development also requires the Microsoft C++ Build Tools and WebView2. We
 ### Run locally
 
 ```bash
-git clone https://github.com/mvillarejo/ttm.git
-cd ttm
+git clone https://github.com/mvillarejo/hablo.git
+cd hablo
 npm ci
 npm run tauri:dev
 ```

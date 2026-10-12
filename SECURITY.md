@@ -2,13 +2,13 @@
 
 ## Supported versions
 
-Security fixes are applied to the latest released version of Hablo on the `main` branch and published through [GitHub Releases](https://github.com/mvillarejo/ttm/releases). Older installers are not patched in place; upgrade to the newest release when a fix is available.
+Security fixes are applied to the latest released version of Hablo on the `main` branch and published through [GitHub Releases](https://github.com/mvillarejo/hablo/releases). Older installers are not patched in place; upgrade to the newest release when a fix is available.
 
 ## Reporting a vulnerability
 
 If you find a security issue in Hablo — for example unsafe handling of the Gladia API key, clipboard contents, local config/history data, or the paste / Accessibility integration — please report it privately.
 
-**Preferred:** use [GitHub private vulnerability reporting](https://github.com/mvillarejo/ttm/security/advisories/new) for this repository.
+**Preferred:** use [GitHub private vulnerability reporting](https://github.com/mvillarejo/hablo/security/advisories/new) for this repository.
 
 Please do not open a public GitHub issue or pull request that discloses an unfixed vulnerability.
 
