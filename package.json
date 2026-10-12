@@ -3,6 +3,7 @@
   "version": "0.2.0",
   "description": "Voice dictation for any app — local models via Ollama or Gladia live streaming",
   "author": "Manuel Villarejo",
+  "license": "MIT",
   "private": true,
   "engines": {
     "node": ">=20.19.0"
@@ -19,6 +20,7 @@
     "test": "cargo test --manifest-path src-tauri/Cargo.toml && vitest run && npm run typecheck",
     "typecheck": "tsc --noEmit",
     "screenshots": "node scripts/capture-screenshots.mjs",
+    "notices": "node scripts/generate-notices.mjs",
     "screenshots:permissions": "node scripts/capture-screenshots.mjs 01-permissions"
   },
   "dependencies": {
