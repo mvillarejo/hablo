@@ -73,6 +73,10 @@ pub struct AppState {
 }
 
 const TRAY_ID: &str = "main-tray";
+// macOS gets a monochrome template glyph; Windows has no template images, so it keeps the colour icon.
+#[cfg(target_os = "macos")]
+const TRAY_ICON_IDLE: &[u8] = include_bytes!("../icons/tray-idle.png");
+#[cfg(not(target_os = "macos"))]
 const TRAY_ICON_IDLE: &[u8] = include_bytes!("../icons/32x32.png");
 const TRAY_ICON_DICTATING: &[u8] = include_bytes!("../icons/tray-microphone.png");
 const TRAY_SPINNER_FRAMES: &[&[u8]] = &[
@@ -134,6 +138,7 @@ async fn apply_tray_activity(
         "recording" => {
             let icon = tray_icon_from_bytes(TRAY_ICON_DICTATING)?;
             tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
+            let _ = tray.set_icon_as_template(false);
             tray.set_tooltip(Some("Hablo — Dictating…"))
                 .map_err(|e| e.to_string())?;
         }
@@ -147,6 +152,7 @@ async fn apply_tray_activity(
                     if let Ok(icon) = tray_icon_from_bytes(bytes) {
                         if let Ok(tray) = tray_handle(&app_handle) {
                             let _ = tray.set_icon(Some(icon));
+                            let _ = tray.set_icon_as_template(false);
                             let tooltip = if starting {
                                 "Hablo — Starting microphone…"
                             } else {
@@ -164,6 +170,8 @@ async fn apply_tray_activity(
         _ => {
             let icon = tray_icon_from_bytes(TRAY_ICON_IDLE)?;
             tray.set_icon(Some(icon)).map_err(|e| e.to_string())?;
+            // The idle glyph is a template image so macOS tints it like the other menu bar icons.
+            let _ = tray.set_icon_as_template(true);
             tray.set_tooltip(Some("Hablo")).map_err(|e| e.to_string())?;
         }
     }
@@ -1519,6 +1527,7 @@ fn main() {
             let idle_icon = tray_icon_from_bytes(TRAY_ICON_IDLE)?;
             let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(idle_icon)
+                .icon_as_template(true)
                 .tooltip("Hablo")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
